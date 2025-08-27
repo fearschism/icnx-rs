@@ -1,0 +1,417 @@
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/tauri';
+import { Download, History, Clock } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Card } from '../components/ui/card';
+import ScrapeResultsDialog from '../components/ScrapeResultsDialog';
+import ScriptPickerDialog from '../components/ScriptPickerDialog';
+import type { ScriptInfo } from '../types';
+import DownloadCard from '../components/DownloadCard';
+
+interface DownloadInfo {
+  id: string;
+  url: string;
+  filename: string;
+  destination: string;
+}
+
+type DownloadSessionSummary = {
+  session_id: string;
+  title: string;
+  subtitle: string;
+  total_size: string;
+  status: string;
+  created_at: number;
+};
+
+function QuickDownload() {
+  const [url, setUrl] = useState('');
+  const [destination, setDestination] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [status, setStatus] = useState('');
+  const [globalScriptLock, setGlobalScriptLock] = useState<boolean>(() => (window as any).__icnxScriptRunning === true);
+  const [activeTab, setActiveTab] = useState<'current' | 'history'>('current');
+  const [historyItems, setHistoryItems] = useState<DownloadSessionSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const anyE = e as CustomEvent<{ running: boolean }>;
+      setGlobalScriptLock(!!anyE.detail?.running);
+    };
+    window.addEventListener('icnx:script-running-changed', handler as any);
+    return () => window.removeEventListener('icnx:script-running-changed', handler as any);
+  }, []);
+  const [scrapeItems] = useState<any[] | null>(null);
+  const [showScrapeDialog, setShowScrapeDialog] = useState(false);
+  const [scriptChoices, setScriptChoices] = useState<ScriptInfo[] | null>(null);
+  const [showScriptPicker, setShowScriptPicker] = useState(false);
+
+  // Overview download cards (show each download or scrape as a card under the form)
+  const [cards, setCards] = useState<{ id: string; url: string; filename?: string; destination: string; sessionId?: string | null; scriptName?: string | null; isScrape?: boolean }[]>([]);
+
+  // load persisted overview cards (kept on window so they survive navigation/HMR)
+  useEffect(() => {
+    try {
+      const g: any = window as any;
+      const known = (g.__icnxOverviewCards as any[]) || [];
+      if (known && known.length) setCards(known as any);
+    } catch (_) {}
+  }, []);
+
+  // Load history items
+  const loadHistory = async () => {
+    if (activeTab === 'history') {
+      setHistoryLoading(true);
+      try {
+        const history = await invoke<DownloadSessionSummary[]>('get_download_history');
+        setHistoryItems(history);
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+  };
+
+  // Load history when switching to history tab
+  useEffect(() => {
+    loadHistory();
+  }, [activeTab]);
+
+  useEffect(() => {
+    // Load default destination from settings
+    (async () => {
+      try {
+        const settings = await invoke<any>('get_settings');
+        if (settings?.default_download_dir) setDestination(settings.default_download_dir);
+      } catch {}
+    })();
+  }, []);
+
+  const handleDownload = async () => {
+    if (!url.trim()) {
+      setStatus('Please enter a URL');
+      return;
+    }
+
+    setIsDownloading(true);
+    setStatus('Preparing...');
+
+    try {
+      const matches = await detectMatchingScripts(url.trim());
+      if (!matches || matches.length === 0) {
+        // Fallback to direct file download
+        const urlObj = new URL(url.trim());
+        const pathname = urlObj.pathname;
+        const filename = pathname.split('/').pop() || 'download';
+        const downloadInfo: DownloadInfo = {
+          id: crypto.randomUUID(),
+          url: url.trim(),
+          filename: filename.includes('.') ? filename : `${filename}.bin`,
+          destination,
+        };
+        setStatus('No scraper matched. Downloading directly...');
+  // create an overview card and start backend download session
+  const id = crypto.randomUUID();
+  const newCard = { id, url: downloadInfo.url, filename: downloadInfo.filename, destination, isScrape: false };
+  setCards((prev) => { const next = [...prev, newCard]; try { (window as any).__icnxOverviewCards = next; } catch(_){}; return next; });
+        // start backend session so progress events are emitted
+        (async () => {
+          try {
+            const sid = await invoke<string>('start_download_session', { items: [{ url: downloadInfo.url, filename: downloadInfo.filename }], destination } as any);
+            setCards((prev) => prev.map(c => c.id === id ? { ...c, sessionId: sid } : c));
+          } catch (err) {
+            console.error('failed to start download session for quick download', err);
+          }
+        })();
+        // clear url field
+        setUrl('');
+        return;
+      }
+
+      let picked: ScriptInfo;
+      if (matches.length === 1) {
+        picked = matches[0];
+      } else {
+        setScriptChoices(matches);
+        setShowScriptPicker(true);
+        setIsDownloading(false);
+        return;
+      }
+
+      // Start a background scrape and show a card in the overview (do not navigate)
+      ;(window as any).__icnxDestination = destination;
+      ;(window as any).__icnxForceNewScrape = true;
+      ;(window as any).__icnxHasActiveSession = true;
+      ;(window as any).__icnxActive = { kind: 'scrape', url: url.trim() };
+      window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
+  // create an overview card representing the scrape
+  const cardId = crypto.randomUUID();
+  const newCard = { id: cardId, url: url.trim(), filename: undefined, destination, isScrape: true, scriptName: picked.name };
+  setCards((prev) => { const next = [...prev, newCard]; try { (window as any).__icnxOverviewCards = next; } catch(_){}; return next; });
+      // start the scraper in the background
+      (async () => {
+        try {
+          (window as any).__icnxCurrentScrapeKey = `${picked.name}::${url.trim()}`;
+          await invoke('run_script', { scriptName: picked.name, options: { inputUrl: url.trim(), maxPages: 10 } });
+        } catch (err) {
+          console.error('failed to start scraper', err);
+        }
+      })();
+      setIsDownloading(false);
+      setStatus('');
+      return;
+    } catch (error) {
+      setStatus(`Invalid URL: ${error}`);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const detectMatchingScripts = async (rawUrl: string): Promise<ScriptInfo[] | null> => {
+    try {
+      const urlObj = new URL(rawUrl);
+      const host = urlObj.hostname.toLowerCase();
+      const scripts = await invoke<ScriptInfo[]>('get_installed_scripts');
+      const matches = scripts.filter((s) => {
+        const anyS: any = s as any;
+        const domains: string[] = (anyS.supportedDomains || anyS.supported_domains || []) as string[];
+        return domains && domains.some((d) => host === d.toLowerCase() || host.endsWith(`.${d.toLowerCase()}`));
+      });
+      return matches;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !isDownloading) {
+      handleDownload();
+    }
+  };
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleString();
+  };
+
+  return (
+    <div className="animate-fade-in">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-white mb-2">Download Manager</h1>
+        <p className="text-gray-400">Manage your downloads and view download history</p>
+      </div>
+      
+      {/* Quick Download Panel */}
+      <div className="mb-6 p-6 bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="max-w-2xl mx-auto">
+          <h2 className="text-xl font-semibold text-white mb-4">Quick Download</h2>
+          <div className="space-y-4">
+            {/* URL Input */}
+            <div>
+              <label htmlFor="url" className="label mb-2">
+                File URL
+              </label>
+              <Input
+                id="url"
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="https://example.com/file.zip"
+                disabled={isDownloading}
+                className="text-sm h-9"
+              />
+            </div>
+
+            {/* Destination is taken from Settings; no picker here */}
+            <div className="text-sm text-gray-400">Saving to: <span className="text-gray-200">{destination || '...'}</span> (change in Settings)</div>
+
+            {/* Download Button */}
+            <Button onClick={handleDownload} disabled={isDownloading || !url.trim() || globalScriptLock} className="w-full">
+              <Download size={18} />
+              <span className="ml-2">{isDownloading ? 'Downloading...' : (globalScriptLock ? 'Disabled while a script is running' : 'Download')}</span>
+            </Button>
+
+            {/* Status */}
+            {status && (
+              <div className={`p-3 rounded-lg ${
+                status.toLowerCase().includes('failed')
+                  ? 'bg-red-900/40 border border-red-700 text-red-200'
+                  : status.toLowerCase().includes('completed') || status.toLowerCase().includes('success')
+                  ? 'bg-green-900/40 border border-green-700 text-green-200'
+                  : 'bg-blue-900/40 border border-blue-700 text-blue-200'
+              }`}>
+                <p className="text-sm">{status}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Tab navigation */}
+      <div className="mb-6 flex border-b border-gray-700">
+        <button 
+          className={`px-4 py-2 font-medium ${activeTab === 'current' 
+            ? 'text-primary border-b-2 border-primary' 
+            : 'text-gray-400 hover:text-white'}`}
+          onClick={() => setActiveTab('current')}
+        >
+          <div className="flex items-center gap-2">
+            <Download size={18} />
+            <span>Current Downloads</span>
+          </div>
+        </button>
+        <button 
+          className={`px-4 py-2 font-medium ${activeTab === 'history' 
+            ? 'text-primary border-b-2 border-primary' 
+            : 'text-gray-400 hover:text-white'}`}
+          onClick={() => setActiveTab('history')}
+        >
+          <div className="flex items-center gap-2">
+            <History size={18} />
+            <span>Download History</span>
+          </div>
+        </button>
+      </div>
+
+      {activeTab === 'current' ? (
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_36rem] gap-6 items-start">
+          {/* Left column: tips */}
+          <div>
+            {/* Tips panel */}
+            <Card className="p-4">
+              <h3 className="text-sm font-medium text-white mb-2">Tips</h3>
+              <ul className="text-xs text-gray-400 space-y-1">
+                <li>• If the link belongs to a supported site, we'll scrape and show results first.</li>
+                <li>• Otherwise, we'll download the file directly.</li>
+                <li>• Completed downloads are automatically moved to the History tab.</li>
+              </ul>
+            </Card>
+          </div>
+
+          {/* Right column: compact card stack */}
+          <aside className="space-y-3 sticky top-6">
+            <h3 className="text-lg font-medium text-white mb-3">Active Downloads</h3>
+            {cards.length === 0 ? (
+              <div className="text-sm text-gray-500">No active downloads yet — started downloads will appear here.</div>
+            ) : (
+              <div className="space-y-3">
+                {cards.map(c => (
+                  <DownloadCard key={c.id} url={c.url} filename={c.filename} destination={c.destination} sessionId={c.sessionId} scriptName={c.scriptName} isScrape={c.isScrape} />
+                ))}
+              </div>
+            )}
+          </aside>
+        </div>
+          </aside>
+        </div>
+      ) : (
+        /* History tab content */
+        <div className="space-y-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium text-white">Download History</h3>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={loadHistory}
+              disabled={historyLoading}
+            >
+              <Clock size={16} className="mr-2" />
+              Refresh
+            </Button>
+          </div>
+          
+          {historyLoading ? (
+            <div className="text-gray-400">Loading history...</div>
+          ) : historyItems.length === 0 ? (
+            <div className="text-gray-400">No download history yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {historyItems.map((h) => (
+                <div key={h.session_id} className="card flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-white break-all">{h.title}</div>
+                    <div className="text-xs text-gray-400">{h.subtitle}</div>
+                    <div className="text-xs text-gray-500 mt-1">{h.total_size} • {formatDate(h.created_at)}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className={`text-sm ${h.status === 'Completed' ? 'text-green-400' : h.status === 'Failed' ? 'text-red-400' : 'text-yellow-300'}`}>{h.status}</div>
+                    <button className="btn-secondary" onClick={() => {
+                      window.dispatchEvent(new CustomEvent('icnx:navigate', { detail: { tab: 'download-history-details', sessionId: h.session_id } } as any));
+                    }}>View details</button>
+                    <button className="btn-ghost text-red-300" onClick={async () => {
+                      const ok = confirm('Delete this session? Files will also be deleted.');
+                      if (!ok) return;
+                      try {
+                        await invoke('delete_download_session', { sessionId: h.session_id, deleteFiles: true });
+                        setHistoryItems(prev => prev.filter(x => x.session_id !== h.session_id));
+                      } catch (e) {
+                        // ignore
+                      }
+                    }}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showScriptPicker && scriptChoices && (
+        <ScriptPickerDialog
+          isOpen={showScriptPicker}
+          onClose={() => { setShowScriptPicker(false); setScriptChoices(null); }}
+          scripts={scriptChoices}
+          inputUrl={url}
+          onPick={async (script) => {
+            setShowScriptPicker(false);
+            ;(window as any).__icnxDestination = destination;
+            ;(window as any).__icnxHasActiveSession = true;
+            ;(window as any).__icnxForceNewScrape = true;
+            ;(window as any).__icnxActive = { kind: 'scrape', url: url.trim() };
+            window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
+            // create an overview card for the scrape and start the scraper in background
+              const cardId = crypto.randomUUID();
+              const newCard = { id: cardId, url: url.trim(), filename: undefined, destination, isScrape: true, scriptName: script.name };
+              setCards((prev) => { const next = [...prev, newCard]; try { (window as any).__icnxOverviewCards = next; } catch(_){}; return next; });
+              (async () => {
+              try {
+                (window as any).__icnxCurrentScrapeKey = `${script.name}::${url.trim()}`;
+                await invoke('run_script', { scriptName: script.name, options: { inputUrl: url.trim(), maxPages: 10 } });
+              } catch (err) {
+                console.error('failed to start scraper', err);
+              }
+            })();
+          }}
+        />
+      )}
+      
+      {showScrapeDialog && scrapeItems && (
+        <ScrapeResultsDialog
+          isOpen={showScrapeDialog}
+          onClose={() => setShowScrapeDialog(false)}
+          items={scrapeItems}
+          onConfirm={async (selected) => {
+            setShowScrapeDialog(false);
+            if (!selected || selected.length === 0) return;
+            // create an overview card and start a backend download session for the selected items
+            const cardId = crypto.randomUUID();
+            setCards((prev) => [...prev, { id: cardId, url: selected[0].url, filename: selected[0].filename, destination, isScrape: false }]);
+            (async () => {
+              try {
+                const sid = await invoke<string>('start_download_session', { items: selected.map(s => ({ url: s.url, filename: s.filename, title: s.title, type: s.type })), destination } as any);
+                setCards((prev) => prev.map(c => c.id === cardId ? { ...c, sessionId: sid } : c));
+              } catch (err) {
+                console.error('failed to start download session from scrape selection', err);
+              }
+            })();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+export default QuickDownload;

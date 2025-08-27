@@ -1,0 +1,564 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: var(--panel-border);
+  }
+  
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900;
+  }
+  
+  .btn-primary {
+  @apply btn text-white focus:ring-primary-500;
+  background-color: var(--crail) !important;
+  color: white !important;
+  }
+  .btn-primary:hover {
+  background-color: var(--crail-strong) !important;
+  }
+  
+  .btn-secondary {
+    @apply btn bg-gray-700 hover:bg-gray-600 text-gray-200 focus:ring-gray-500;
+  }
+  
+  .btn-ghost {
+    @apply btn hover:bg-gray-800 text-gray-300 focus:ring-gray-500;
+  }
+  
+  .card {
+    @apply bg-gray-800/70 rounded-xl border border-gray-700/60 p-6 backdrop-blur-md;
+  }
+  
+  /* Modern sleek effect for glass elements */
+  .glass {
+    @apply bg-gray-800/50 backdrop-blur-md border border-gray-600/20 shadow-sm;
+    position: relative;
+  }
+  
+  .glass-card {
+    @apply bg-gray-800/40 backdrop-blur-md rounded-xl p-6 border border-gray-600/15 shadow-sm;
+  }
+  
+  .glass-input {
+    @apply bg-gray-700/40 backdrop-blur-md border border-gray-600/20 shadow-sm rounded-lg text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-400/60 focus:border-transparent;
+  }
+  
+  .sidebar-item {
+    @apply flex items-center px-4 py-3 text-xs font-medium rounded-lg transition-colors duration-200;
+  }
+  
+  .sidebar-item-active {
+    @apply sidebar-item bg-primary-600 text-white;
+  }
+  
+  .sidebar-item-inactive {
+    @apply sidebar-item text-gray-300 hover:bg-gray-800 hover:text-white;
+  }
+}
+
+/* Truncation utility for tables and sidebar text */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Theme Variants - T3 Chat (Light/Dark) */
+.theme-Light {
+  /* Light variant echoing Crail/Cloudy/Pampas/White */
+  --bg: #F4F0E6; /* Pampas */
+  --panel: #FFFFFF; /* White */
+  --panel-border: #E5E7EB; /* subtle border */
+  --text: #231513; /* deep crail brown for text */
+  --muted: #6B7C84; /* softened Cloudy */
+  --primary: #5c2820; /* Crail */
+  --primary-strong: #34140e; /* stronger Crail */
+  --crail: #B95140; /* explicit normal Crail for buttons */
+  --crail-strong: #A44436;
+  --accent: #B0BEC5; /* Cloudy */
+  --highlight: #D98A7F; /* Light Crail (highlight) */
+  --panel-glass: rgba(244,240,230,0.75); /* more Pampas tint */
+  --glass-blur: 10px;
+}
+
+.theme-Dark {
+  /* Crail, Cloudy, Pampas, White */
+  --bg: #130b0a; /* deep variant of Crail background */
+  --panel: #1A0F0D; /* darker panel */
+  --panel-border: #22100e; /* outline using Crail family */
+  --text: #FFFFFF; /* White */
+  --muted: #B0BEC5; /* Cloudy */
+  --primary: #1f0402; /* Crail */
+  --primary-strong: #290f0a; /* stronger Crail */
+  --crail: #B95140; /* explicit normal Crail for buttons */
+  --crail-strong: #A44436;
+  /* Darken primary slightly for better contrast */
+  --accent: #F4F0E6; /* Pampas */
+  --highlight: #D98A7F; /* Light Crail (highlight) */
+  --panel-glass: rgba(138, 29, 10, 0.6); /* more translucent */
+  --glass-blur: 20px;
+}
+
+/* Apply variables */
+/* Apply theme colors: put the background color on `html` so an underlay
+   pseudo-element can be visible, and keep `body` transparent to reveal it.
+   Support theme class on either `html` or `body` to be forgiving about where
+   the application attaches the class. */
+html.theme-Light, html.theme-Dark {
+  background-color: var(--bg);
+}
+
+body.theme-Light, body.theme-Dark {
+  background-color: transparent;
+  color: var(--text);
+}
+
+/* Make sure the page content renders above the decorative background. */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Frosted panel styling: use translucent panel-glass with blur and fallback to solid panel color */
+.card, .sidebar, .dialog-content, .dialog-overlay, .dialog-content, .table, .input {
+  background: linear-gradient(var(--panel-glass), var(--panel-glass));
+  background-color: var(--panel);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  transition: background-color 180ms ease, box-shadow 180ms ease, backdrop-filter 180ms ease;
+}
+
+/* For environments without backdrop-filter support we still keep solid panel color fallback via --panel */
+
+.card { background-color: var(--panel); border-color: var(--panel-border); }
+.input { background-color: var(--panel); border-color: var(--panel-border); color: var(--text); }
+.btn-primary { background-color: var(--crail) !important; color: white !important; }
+.btn-primary:hover { background-color: var(--crail-strong) !important; }
+.theme-override .btn-primary, html.theme-Light .btn-primary, body.theme-Light .btn-primary, html.theme-Dark .btn-primary, body.theme-Dark .btn-primary {
+  background-color: var(--crail) !important;
+  color: white !important;
+}
+html.theme-Light .btn-primary:hover, body.theme-Light .btn-primary:hover, html.theme-Dark .btn-primary:hover, body.theme-Dark .btn-primary:hover {
+  background-color: var(--crail-strong) !important;
+}
+.btn-secondary { background-color: var(--panel); color: var(--text); }
+.btn-secondary:hover { background-color: var(--panel-border); }
+.btn-ghost:hover { background-color: var(--panel); }
+.sidebar-item-active { background-color: var(--crail); }
+.sidebar-item-inactive { color: var(--text); }
+.sidebar-item-inactive:hover { background-color: var(--panel-border); }
+.sidebar { background-color: var(--panel-glass); border-color: var(--panel-border); }
+
+/* Light-mode overrides for legacy Tailwind color utilities used in components */
+body.theme-Light .text-white { color: var(--text) !important; }
+body.theme-Light .text-gray-400 { color: var(--muted) !important; }
+body.theme-Light .text-gray-300 { color: var(--muted) !important; }
+body.theme-Light .text-gray-200 { color: var(--muted) !important; }
+body.theme-Light .bg-gray-800, 
+body.theme-Light .bg-gray-700 { background-color: var(--panel) !important; }
+body.theme-Light .hover\:bg-gray-600:hover { background-color: var(--panel-border) !important; }
+
+/* shadcn-like primitives */
+.card { @apply rounded-lg border bg-[var(--panel)] border-[var(--panel-border)] shadow-sm; }
+.input { @apply w-full px-3 py-2 rounded-md bg-[var(--panel)] border border-[var(--panel-border)] text-[var(--text)] placeholder-[var(--muted)] outline-none focus:ring-2 focus:ring-[var(--primary)]; }
+.label { @apply text-sm font-medium text-[var(--muted)]; }
+.table { @apply w-full text-sm; }
+.dialog-overlay { @apply fixed inset-0 bg-black/70 z-50; }
+.dialog-content { @apply fixed z-50 w-full max-w-xl bg-[var(--panel)] border border-[var(--panel-border)] rounded-lg p-6 shadow-lg; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+
+/* Custom scrollbar (themed) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--panel);
+  border-radius: 9999px;
+  border: 1px solid var(--panel-border);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--highlight);
+  border-radius: 9999px;
+  /* create separation from the track using a transparent border that reveals the track color */
+  border: 3px solid var(--panel);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-strong);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12);
+}
+
+/* Firefox support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--highlight) var(--panel);
+}
+
+/* Selection highlight */
+::selection {
+  background: var(--highlight);
+  color: var(--text);
+}
+
+/* Responsive sidebar sizing & divider */
+:root {
+  --sidebar-width: 260px;
+  --sidebar-item-padding-x: 16px; /* matches px-4 */
+  --sidebar-item-padding-y: 12px; /* matches py-3 */
+  --sidebar-item-font-size: 0.875rem; /* text-sm */
+  --sidebar-divider-width: 1px;
+  /* fluid base font size: scales between 11px (mobile) and 16px (desktop)
+     using a linear function that matches 11px at 640px and 15px at 1200px */
+  --base-font-size: clamp(11px, calc(6.4285714px + 0.7142857vw), 16px);
+}
+
+/* Apply base font-size so all rem values scale */
+body {
+  font-size: var(--base-font-size);
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: 160px;
+  box-sizing: border-box;
+  border-right-width: var(--sidebar-divider-width);
+  transition: width 200ms ease, border-right-width 200ms ease;
+}
+
+.sidebar-item {
+  padding: var(--sidebar-item-padding-y) var(--sidebar-item-padding-x);
+  font-size: var(--sidebar-item-font-size);
+  transition: padding 160ms ease, font-size 160ms ease;
+}
+
+/* Desktop: keep defaults (no change) */
+@media (max-width: 1200px) {
+  :root {
+    --sidebar-width: 220px;
+    --sidebar-item-padding-x: 14px;
+    --sidebar-item-padding-y: 10px;
+    --sidebar-item-font-size: 0.8125rem; /* slightly smaller */
+    --sidebar-divider-width: 1px;
+    /* removed fixed --base-font-size to rely on fluid scaling */
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --sidebar-width: 180px;
+    --sidebar-item-padding-x: 12px;
+    --sidebar-item-padding-y: 8px;
+    --sidebar-item-font-size: 0.75rem;
+    --sidebar-divider-width: 0.75px;
+    /* removed fixed --base-font-size to rely on fluid scaling */
+  }
+}
+
+/* Mobile / very small screens: make the sidebar compact to give max space to content */
+@media (max-width: 640px) {
+  :root {
+    --sidebar-width: 72px; /* icon-only style */
+    --sidebar-item-padding-x: 8px;
+    --sidebar-item-padding-y: 8px;
+    --sidebar-item-font-size: 0.6875rem;
+    --sidebar-divider-width: 0.5px;
+    /* removed fixed --base-font-size to rely on fluid scaling */
+  }
+
+  /* hide labels if your sidebar uses text - prefer icons in this mode */
+  .sidebar-item > span {
+    display: none;
+  }
+
+  .sidebar-item {
+    justify-content: center; /* center icon-only items */
+  }
+}
+
+/* Provide a small helper for a thin divider variant that can be toggled on elements */
+.divider-thin {
+  border-right-width: 0.5px !important;
+}
+
+/* Strong frosted glass override (completed)
+   - Use translucent background color (var(--panel-glass)) so backdrop-filter can take effect
+   - Add saturate() for crisper colors and a subtle overlay to simulate glass when backdrop-filter isn't available
+   - Keep border color and shadow for depth
+*/
+.card, .sidebar, .dialog-content, .table, .input {
+  /* translucent base to allow backdrop-filter to work */
+  background: var(--panel-glass) !important;
+  background-color: transparent !important;
+  /* subtle overlay to simulate extra depth on browsers without backdrop-filter support */
+  background-image: linear-gradient(rgba(255,255,255,0.02), rgba(0,0,0,0.02));
+  background-blend-mode: overlay !important;
+
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(120%) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(120%) !important;
+
+  border: 1px solid var(--panel-border) !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45) !important;
+  color: var(--text) !important;
+  background-clip: padding-box !important;
+}
+
+/* Decorative gradient background (ensure visible) */
+/* Decorative gradient background (ensure visible). Support theme class on
+   either `html` or `body` so the gradient shows regardless of where the
+   app places the theme class. */
+/* primary decorative layer (base) */
+html::before, body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2; /* sit behind the flipping layer */
+  pointer-events: none;
+  background-repeat: no-repeat;
+  /* make much larger so circular shifts are visible without seams */
+  background-size: 200% 200%;
+  background-position: 50% 50%;
+  transition: opacity 240ms ease;
+  will-change: background-position, opacity;
+}
+
+/* flipped decorative layer (on top) - we control opacity to 'flip' colors */
+html::after, body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1; /* overlays ::before so opacity swap is visible */
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  background-position: 50% 50%;
+  opacity: 0; /* normally invisible; briefly becomes visible at flip */
+  transition: opacity 300ms ease;
+  will-change: opacity, background-position;
+}
+
+html.theme-Dark::before, body.theme-Dark::before {
+  /* Dark theme: use the Crail gradient (primary -> primary-strong -> near-black) as requested */
+  background-image: linear-gradient(120deg, var(--primary) 10%, #050405 100%);
+}
+/* flipped (dark) overlay uses the same gradient so breathe/overlay opacity shows the Crail primary */
+html.theme-Dark::after, body.theme-Dark::after {
+  /* overlay is a near-black solid so breathing opacity will darken the background when active */
+  background-color: #050405;
+  background-image: none;
+  background-blend-mode: normal;
+  /* make sure the breathing animation runs for dark theme overlay */
+  animation: icnx-bg-breathe 5s ease-in-out infinite;
+  animation-fill-mode: both;
+  will-change: opacity;
+}
+
+/* Light theme: three-stop subtle gradient (pampas -> warm mid -> soft accent) */
+html.theme-Light::before, body.theme-Light::before {
+  background-image: linear-gradient(120deg, #F4F0E6 0%, #F0E6DC 50%, rgba(217,138,127,0.10) 100%);
+}
+/* flipped (light) - invert mid/warm stops for a visible but soft flip */
+html.theme-Light::after, body.theme-Light::after {
+  background-image: linear-gradient(120deg, rgba(217,138,127,0.12) 0%, #F0E6DC 50%, #F4F0E6 100%);
+  /* make sure the breathing animation runs for light theme overlay */
+  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite, icnx-bg-breathe 5s ease-in-out infinite;
+  animation-fill-mode: both;
+  will-change: opacity, background-position;
+}
+
+/* Background motion: slow orbit + gentle float to give the app "life".
+   Subtle translate + rotation on the decorative pseudo-elements creates a
+   circular motion; a separate vertical float adds organic movement. */
+
+/* Animate the gradient itself by moving background-position in a slow, circular pattern.
+   This avoids transforming the pseudo-element (which can affect stacking/painting) and
+   keeps the UI layout stable while the colors drift. */
+@keyframes icnx-bg-orbit-bg {
+  /* larger-radius circular path (percentages map to positions on the pseudo-element) */
+  0%   { background-position: 50% 50%; }
+  12.5% { background-position: 75% 35%; }
+  25%  { background-position: 90% 50%; }
+  37.5% { background-position: 75% 65%; }
+  50%  { background-position: 50% 80%; }
+  62.5% { background-position: 25% 65%; }
+  75%  { background-position: 10% 50%; }
+  87.5% { background-position: 25% 35%; }
+  100% { background-position: 50% 50%; }
+}
+
+@keyframes icnx-bg-float-bg {
+  0%   { background-position: 50% 50%; }
+  50%  { background-position: 50% 44%; }
+  100% { background-position: 50% 50%; }
+}
+
+/* Apply combined background-position animations */
+html::before, body::before {
+  /* faster test timings: orbit 8s, float 3s */
+  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite;
+}
+
+/* Ensure the root fallback gets the same background animation if used */
+html.theme-Dark #root::before, body.theme-Dark #root::before,
+html.theme-Light #root::before, body.theme-Light #root::before {
+  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite;
+}
+
+/* breathe animation: primary color fades in and out slowly (15s) */
+@keyframes icnx-bg-breathe {
+  0%   { opacity: 0; }
+  20%  { opacity: 0.0; }
+  45%  { opacity: 0.9; }
+  55%  { opacity: 0.9; }
+  80%  { opacity: 0.0; }
+  100% { opacity: 0; }
+}
+
+/* apply the breathe to the overlay pseudo-element so the primary color fades in/out */
+html::after, body::after {
+  /* overlay: faster test timings; breathe 5s for visible in/out */
+  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite, icnx-bg-breathe 5s ease-in-out infinite;
+}
+
+/* root fallbacks: ensure the overlay layer exists if the app uses #root::before */
+/* Root-level overlay fallbacks with explicit layers so breathing always works */
+html.theme-Dark #root::after, body.theme-Dark #root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1; /* above ::before (-2/-3), below content (1) */
+  pointer-events: none;
+  background-color: #050405 !important; /* near-black */
+  animation: icnx-bg-breathe 30s ease-in-out infinite !important;
+  animation-fill-mode: both;
+  will-change: opacity;
+}
+html.theme-Light #root::after, body.theme-Light #root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(120deg, rgba(37, 15, 12, 0.12) 0%, #fac38d 50%, #F4F0E6 100%) !important;
+  animation: icnx-bg-breathe 30s ease-in-out infinite !important;
+  animation-fill-mode: both;
+  will-change: opacity;
+}
+
+/* Respect user's reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  html::before, body::before, html.theme-Dark #root::before, body.theme-Dark #root::before, html.theme-Light #root::before, body.theme-Light #root::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Final override: ensure .btn-primary always uses Crail colors.
+   Placed at the end of the file so it appears after Tailwind-generated rules. */
+.btn-primary, button.btn-primary {
+  background-color: var(--crail) !important;
+  color: white !important;
+  --tw-bg-opacity: 1 !important;
+}
+.btn-primary:hover, button.btn-primary:hover {
+  background-color: var(--crail-strong) !important;
+}
+
+/* If the app uses a mount element with its own background, ensure the gradient
+   can be applied to #root as a last-resort fallback. (This is harmless.) */
+/* Theme-aware root fallback: applies gradient directly to the app mount element
+   if top-level pseudo elements are not visible due to stacking contexts. */
+html.theme-Dark #root::before, body.theme-Dark #root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  /* push the root fallback behind the decorative overlay so breathe can show */
+  z-index: -3;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: cover;
+  /* Stronger dark gradient: primary -> primary-strong -> near-black */
+  background-image: linear-gradient(120deg,var(--primary) 0%, var(--primary-strong) 40%, #050405 100%);
+  opacity: 1;
+}
+
+html.theme-Light #root::before, body.theme-Light #root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: cover;
+  /* Light: pampas -> warm mid -> soft accent */
+  background-image: linear-gradient(120deg, #F4F0E6 0%, #F0E6DC 45%, rgba(217,138,127,0.12) 100%);
+  opacity: 1;
+}
+
+/* Splash logo animation */
+
+.icnx-splash-logo-wrap { 
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* rotate once after the entrance; kept on the wrapper so transforms compose with inner float */
+  animation: icnx-splash-rotate 900ms cubic-bezier(.2,.9,.3,1) 700ms both;
+}
+.icnx-splash-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  transform-origin: center center;
+  /* entrance runs immediately; float starts slightly after entrance; pulse delayed so rotation (on wrapper) finishes first */
+  animation: icnx-splash-entrance 600ms cubic-bezier(.2,.9,.3,1) both, icnx-splash-float 3200ms ease-in-out 700ms infinite, icnx-splash-pulse 1800ms ease-in-out 1700ms infinite;
+}
+
+@keyframes icnx-splash-entrance {
+  0% { opacity: 0; transform: translateY(12px) scale(0.88) rotate(-6deg); filter: blur(6px) drop-shadow(0 6px 18px rgba(0,0,0,0.6)); }
+  60% { opacity: 1; transform: translateY(-6px) scale(1.02) rotate(2deg); filter: drop-shadow(0 10px 28px rgba(0,0,0,0.55)); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); filter: drop-shadow(0 6px 18px rgba(0,0,0,0.6)); }
+}
+
+@keyframes icnx-splash-float {
+  0% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-6px) rotate(1deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes icnx-splash-pulse {
+  0% { box-shadow: 0 6px 18px rgba(0,0,0,0.6), 0 0 0 0 rgba(185,81,64,0.06); }
+  70% { box-shadow: 0 10px 30px rgba(0,0,0,0.55), 0 0 0 10px rgba(185,81,64,0.02); }
+  100% { box-shadow: 0 6px 18px rgba(0,0,0,0.6), 0 0 0 0 rgba(185,81,64,0.00); }
+}
+
+@keyframes icnx-splash-rotate {
+  0% { transform: rotate(0deg) scale(1); }
+  40% { transform: rotate(18deg) scale(1.03); }
+  70% { transform: rotate(-8deg) scale(1.01); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+/* Respect prefers-reduced-motion */
+/* DEBUG OVERRIDE: force dark-overlay breathe so we can visually verify it.
+   Remove or revert after verification. */
+html.theme-Dark::after, body.theme-Dark::after {
+  background-color: #050405 !important;
+  background-image: none !important;
+  /* subtle breath: darkens mid-cycle, gradient visible between breaths */
+  animation: icnx-bg-breathe 15s ease-in-out infinite !important;
+  animation-fill-mode: both !important;
+  will-change: opacity !important;
+  z-index: -1 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icnx-splash-logo { animation: none !important; }
+}

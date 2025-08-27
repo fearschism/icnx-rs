@@ -1,0 +1,45 @@
+{
+  "name": "WebScrapingDev Consumables Media",
+  "description": "Scrape all media from the consumables section with pagination",
+  "version": "0.1.0",
+  "author": "ICNX",
+  "category": "media",
+  "tags": [
+    "web-scraping.dev",
+    "consumables",
+    "images"
+  ],
+  "icon": "🧪",
+  "website": null,
+  "supportedDomains": [
+    "web-scraping.dev"
+  ],
+  "options": [
+    {
+      "id": "format",
+      "type": "",
+      "label": "Hello Discord community",
+      "description": "This is generated from manifest.json",
+      "required": true,
+      "default": "mp4",
+      "placeholder": null,
+      "min": null,
+      "max": null,
+      "options": [
+        {
+          "label": "Hello",
+          "value": "mp4"
+        },
+        {
+          "label": "Hi",
+          "value": "webm"
+        },
+        {
+          "label": "Bye?",
+          "value": "avi"
+        }
+      ],
+      "depends_on": null
+    }
+  ]
+}

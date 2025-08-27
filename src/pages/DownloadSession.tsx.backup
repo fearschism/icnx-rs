@@ -1,0 +1,998 @@
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/tauri';
+import { Check, Clock, Download, Pause, Play, RefreshCw, X } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Card } from '../components/ui/card';
+import type { DownloadProgress } from '../types';
+
+type Item = { url: string; filename?: string; title?: string; type?: string };
+
+export default function DownloadSession({ 
+  items, 
+  destination, 
+  started, 
+  onStarted, 
+  onBack 
+}: { 
+  items: Item[]; 
+  destination: string; 
+  started?: boolean; 
+  onStarted?: () => void; 
+  onBack: () => void 
+}) {
+  // Progress tracking
+  const [progressMap, setProgressMap] = useState<Record<string, DownloadProgress | undefined>>(() => {
+    const g: any = window as any;
+    return (g.__icnxProgress && typeof g.__icnxProgress === 'object') 
+      ? { ...(g.__icnxProgress as any) } 
+      : {};
+  });
+  
+  // UI states
+  const [status, setStatus] = useState('');
+  const [isPaused, setIsPaused] = useState(false);
+  const [sessionFinished, setSessionFinished] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [canCloseSession, setCanCloseSession] = useState(true);
+  const [failedItems, setFailedItems] = useState<Item[]>([]);
+  const [pauseRequestInFlight, setPauseRequestInFlight] = useState(false);
+  
+  // Session management
+  const [hasActiveSession, setHasActiveSession] = useState<boolean>(() => 
+    !!((window as any).__icnxHasActiveSession));
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(() => 
+    (window as any).__icnxCurrentSessionId);
+  
+  // Refs for stable values across re-renders
+  const seenUrlsRef = useRef<Set<string>>(new Set(Object.keys(progressMap)));
+  const pauseTimeoutRef = useRef<number | null>(null);
+  const uniqueItems = useMemo(() => {
+    const seen: Record<string, boolean> = {};
+    const out: Item[] = [];
+    for (const it of items) {
+      if (!seen[it.url]) { 
+        seen[it.url] = true; 
+        out.push(it); 
+      }
+    }
+    return out;
+  }, [items]);
+  
+  const queueRef = useRef(uniqueItems);
+  const runningRef = useRef(false);
+  
+  // Sync session state from window globals
+  const syncSessionFromWindow = useCallback(() => {
+    const g: any = window as any;
+    setHasActiveSession(!!g.__icnxHasActiveSession);
+    setCurrentSessionId(g.__icnxCurrentSessionId);
+  }, []);
+  
+  // Update queue ref when items change
+  useEffect(() => { 
+    queueRef.current = uniqueItems; 
+  }, [uniqueItems]);
+
+  // Event listeners for download progress
+  useEffect(() => {
+    // Track if component is mounted to prevent state updates after unmount
+    let isMounted = true;
+    const unsubs: Array<() => void> = [];
+    
+    // All events to listen for
+    const events = [
+      'download_progress',
+      'download_item_queued',
+      'download_item_started',
+      'download_item_response',
+      'download_item_error',
+      'download_item_completed',
+      'download_session_started',
+      'download_session_finished',
+      'download_session_cleanup',
+      'download_session_purged',
+      'download_session_paused',
+      'download_session_resumed',
+      'download_session_cancelled',
+      'download_item_paused',
+      'download_item_resumed'
+    ];
+
+    // Register all event listeners
+    (async () => {
+      try {
+        // Progress event listener
+        const unProgress = await listen<any>('download_progress', (e) => {
+          if (!isMounted) return;
+          
+          try {
+            const url = e.payload.url;
+            if (!url) return;
+            
+            // Add to seen URLs to prevent resetting progress
+            seenUrlsRef.current.add(url);
+            
+            // Update progress in state and window global
+            setProgressMap(prev => {
+              const next = { 
+                ...prev, 
+                [url]: {
+                  progress: e.payload.progress ?? 0,
+                  downloaded: e.payload.downloaded ?? 0,
+                  total: e.payload.total ?? null,
+                  speed: e.payload.speed ?? 0,
+                  eta: e.payload.eta ?? null,
+                  status: e.payload.status ?? 'downloading',
+                  url: url,
+                  filename: e.payload.filename,
+                  error: e.payload.error
+                }
+              };
+              
+              // Update window global for persistence across navigation
+              try {
+                (window as any).__icnxProgress = next;
+              } catch(_) {}
+              
+              return next;
+            });
+          } catch (err) {
+            console.error('Progress event handling error', err);
+          }
+        });
+        
+        unsubs.push(unProgress as () => void);
+        
+        // Register all other event listeners
+        for (const eventName of events) {
+          if (eventName === 'download_progress') continue; // Already handled above
+          
+          const unsubscribe = await listen<any>(eventName, (e) => {
+            if (!isMounted) return;
+            
+            try {
+              handleEvent(eventName, e.payload);
+            } catch (err) {
+              console.error(`Error handling ${eventName} event`, err);
+            }
+          });
+          
+          unsubs.push(unsubscribe as () => void);
+        }
+        
+        // Mark listeners as ready
+        if (isMounted) {
+          (window as any).__icnxEventListenersReady = true;
+        }
+      } catch (err) {
+        console.error('Error setting up event listeners', err);
+      }
+    })();
+
+    // Start download session if not already started
+    if (!started && !runningRef.current) {
+      startDownloadSession();
+    }
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+      unsubs.forEach(un => {
+        try {
+          un();
+        } catch (err) {
+          console.error('Error unsubscribing from event', err);
+        }
+      });
+    };
+  }, []);
+
+  // Handler for all download events
+  const handleEvent = useCallback((eventName: string, payload: any) => {
+    switch (eventName) {
+      case 'download_item_queued':
+        setStatus(`Queued: ${payload.url}`);
+        break;
+        
+      case 'download_item_started':
+        setStatus(`Started: ${payload.url}`);
+        break;
+        
+      case 'download_item_response':
+        setStatus(`Response: ${payload.url} ${payload.status}`);
+        break;
+        
+      case 'download_item_error':
+        setStatus(`Error: ${payload.url} ${payload.error}`);
+        window.dispatchEvent(new CustomEvent('icnx:toast', { 
+          detail: { type: 'error', message: `Download failed: ${payload.url}` } 
+        }));
+        break;
+        
+      case 'download_item_completed':
+        setStatus(`Completed: ${payload.url}`);
+        break;
+        
+      case 'download_session_started':
+        setStatus(`Session started (${payload.count} items)`);
+        handleSessionStarted(payload);
+        break;
+        
+      case 'download_session_finished':
+        setStatus(`Session finished`);
+        handleSessionFinished(payload);
+        break;
+        
+      case 'download_session_cleanup':
+        handleSessionCleanup(payload);
+        break;
+        
+      case 'download_session_purged':
+        handleSessionPurged(payload);
+        break;
+        
+      case 'download_session_paused':
+        setIsPaused(true);
+        setStatus('Session paused');
+        setHasActiveSession(true);
+        
+        // Clear pending pause timeout and flag
+        if (pauseTimeoutRef.current) {
+          window.clearTimeout(pauseTimeoutRef.current);
+          pauseTimeoutRef.current = null;
+        }
+        
+        setPauseRequestInFlight(false);
+        
+        // Show toast notification
+        window.dispatchEvent(new CustomEvent('icnx:toast', { 
+          detail: { type: 'info', message: 'Session paused' } 
+        }));
+        break;
+        
+      case 'download_item_paused':
+        updateItemStatus(payload.url, 'paused');
+        break;
+        
+      case 'download_item_resumed':
+        updateItemStatus(payload.url, 'downloading');
+        break;
+        
+      case 'download_session_resumed':
+        setIsPaused(false);
+        setStatus('Session resumed');
+        setHasActiveSession(true);
+        
+        window.dispatchEvent(new CustomEvent('icnx:toast', { 
+          detail: { type: 'success', message: 'Session resumed' } 
+        }));
+        break;
+        
+      case 'download_session_cancelled':
+        setIsPaused(false);
+        setHasActiveSession(false);
+        setStatus('Session cancelled');
+        setCurrentSessionId(undefined);
+        break;
+    }
+  }, []);
+
+  // Helper to update a single item's status
+  const updateItemStatus = useCallback((url: string, status: string) => {
+    if (!url) return;
+    
+    setProgressMap(prev => {
+      const cur = prev || {};
+      const existing = cur[url] || {} as any;
+      return { ...cur, [url]: { ...existing, status } };
+    });
+  }, []);
+
+  // Handler for session started event
+  const handleSessionStarted = useCallback((payload: any) => {
+    // Extract session ID from payload using various field names
+    const sid = payload?.session_id || payload?.sessionId || payload?.session;
+    
+    if (sid) {
+      // Update global state
+      try {
+        (window as any).__icnxHasActiveSession = true;
+        (window as any).__icnxCurrentSessionId = sid;
+      } catch (_) {}
+      
+      // Update component state
+      setHasActiveSession(true);
+      setCurrentSessionId(sid);
+      
+      // Notify parent component if needed
+      if (onStarted) onStarted();
+    }
+  }, [onStarted]);
+
+  // Handler for session finished event
+  const handleSessionFinished = useCallback((payload: any) => {
+    // Mark session as finished
+    setSessionFinished(true);
+    setCanCloseSession(false);
+    
+    try {
+      const g: any = window as any;
+      g.__icnxSessionFinished = true;
+      g.__icnxDownloadRunActive = false;
+      
+      // Extract session ID from various possible fields
+      const sid = payload?.session_id || payload?.sessionId || payload?.session || 
+                  g.__icnxCurrentSessionId || currentSessionId;
+      
+      if (sid) {
+        // Add to history database
+        try {
+          invoke('add_to_download_history', { session_id: sid });
+        } catch (err) {
+          console.error('Failed to add to download history', err);
+        }
+      }
+      
+      // Show success notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', { 
+        detail: { type: 'success', message: 'Download session finished.' } 
+      }));
+      
+      // Auto-close if enabled in settings
+      checkAutoCloseSettings(sid);
+      
+      // Hydrate final progress from database
+      hydrateProgressFromDb(payload);
+    } catch (err) {
+      console.error('Session finish handler error', err);
+    }
+  }, [currentSessionId]);
+
+  // Check if auto-close is enabled in settings and handle accordingly
+  const checkAutoCloseSettings = useCallback(async (sessionId: string) => {
+    try {
+      const settings = await invoke<any>('get_settings');
+      
+      if (settings?.auto_close_downloads) {
+        setTimeout(() => {
+          // Clear session data
+          try {
+            const g: any = window as any;
+            g.__icnxHasActiveSession = false;
+            g.__icnxCurrentSessionId = undefined;
+            g.__icnxSession = undefined;
+            g.__icnxSessionFinished = false;
+            g.__icnxActive = undefined;
+            g.__icnxSessionBadge = undefined;
+            delete g.__icnxProgress;
+          } catch (_) {}
+          
+          // Notify UI components
+          window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
+          
+          // Navigate to QuickDownload page
+          window.dispatchEvent(new CustomEvent('icnx:navigate', { 
+            detail: { tab: 'quick' } 
+          }));
+        }, 3000);
+      }
+    } catch (err) {
+      console.error('Failed to check auto-close setting', err);
+    }
+  }, []);
+
+  // Load final progress data from database
+  const hydrateProgressFromDb = useCallback(async (payload: any) => {
+    try {
+      const sid = payload?.session_id || payload?.sessionId || payload?.session || 
+                  (window as any).__icnxCurrentSessionId || currentSessionId;
+      
+      if (!sid) return;
+      
+      let rows: any[] = [];
+      
+      // Try up to 5 times with short delays to wait for writer to flush
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const res = await invoke('read_download_session', { session_id: sid, destination });
+          rows = (res as any)?.rows || [];
+          if (rows.length > 0) break;
+        } catch (_) {}
+        
+        await new Promise(r => setTimeout(r, 120));
+      }
+
+      // Process rows into progress map
+      const store: Record<string, any> = {};
+      
+      for (const r of rows) {
+        store[r.url] = {
+          progress: r.progress ?? 0,
+          downloaded: r.downloaded ?? 0,
+          total: r.total ?? null,
+          speed: r.speed ?? 0,
+          eta: r.eta ?? null,
+          status: r.status ?? 'unknown',
+          url: r.url,
+          filename: r.filename ?? undefined,
+          error: r.error ?? undefined,
+        };
+      }
+      
+      // Identify failed items
+      const failed: Item[] = [];
+      
+      for (const ui of items) {
+        const p = store[ui.url];
+        
+        if (p && p.error) { 
+          failed.push({ 
+            url: ui.url, 
+            filename: ui.filename, 
+            title: ui.title, 
+            type: ui.type 
+          });
+          continue;
+        }
+        
+        const statusStr = p && p.status ? String(p.status).toLowerCase() : '';
+        
+        if (statusStr && /(error|failed|cancel|cancelled)/.test(statusStr)) { 
+          failed.push({ 
+            url: ui.url, 
+            filename: ui.filename, 
+            title: ui.title, 
+            type: ui.type 
+          });
+          continue;
+        }
+        
+        if (!p) continue;
+        
+        if ((p.progress || 0) < 1 && !/paused|queued|waiting|download/i.test(statusStr)) { 
+          failed.push({ 
+            url: ui.url, 
+            filename: ui.filename, 
+            title: ui.title, 
+            type: ui.type 
+          });
+        }
+      }
+      
+      setFailedItems(failed);
+      setProgressMap(store);
+      
+      // Update seen URLs
+      Object.keys(store).forEach(u => seenUrlsRef.current.add(u));
+      
+      setIsPaused(false);
+      setHasActiveSession(true);
+      setCurrentSessionId((window as any).__icnxCurrentSessionId || sid);
+    } catch (err) {
+      console.error('Session finish handler DB hydrate error', err);
+    }
+  }, [currentSessionId, destination, items]);
+
+  // Handle session cleanup event
+  const handleSessionCleanup = useCallback((payload: any) => {
+    try {
+      const sid = payload?.session_id || payload?.sessionId;
+      
+      if (sid && currentSessionId && sid !== currentSessionId) {
+        // Not for this session
+        return;
+      }
+      
+      // Clear progress cache
+      try { 
+        delete (window as any).__icnxProgress;
+      } catch (_) {}
+      
+      // Refresh progress map to trigger UI update
+      setProgressMap(prev => ({ ...prev }));
+      
+      // Show notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', { 
+        detail: { type: 'info', message: 'Session cleanup completed' } 
+      }));
+    } catch (err) {
+      console.error('Cleanup handler error', err);
+    }
+  }, [currentSessionId]);
+
+  // Handle session purged event
+  const handleSessionPurged = useCallback((payload: any) => {
+    try {
+      const sid = payload?.session_id || payload?.sessionId;
+      
+      if (!sid || (currentSessionId && sid === currentSessionId) || !currentSessionId) {
+        // Clear global state
+        try {
+          const g: any = window as any;
+          g.__icnxHasActiveSession = false;
+          g.__icnxCurrentSessionId = undefined;
+          g.__icnxSession = undefined;
+          g.__icnxSessionFinished = false;
+          g.__icnxActive = undefined;
+          g.__icnxSessionBadge = undefined;
+        } catch (_) {}
+        
+        // Reset component state
+        setProgressMap({});
+        setSummaryOpen(false);
+        setCanCloseSession(true);
+        setSessionFinished(false);
+        
+        // Notify other components
+        window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
+        
+        // Show notification
+        window.dispatchEvent(new CustomEvent('icnx:toast', { 
+          detail: { type: 'info', message: 'Session purged' } 
+        }));
+        
+        // Navigate to QuickDownload page
+        window.dispatchEvent(new CustomEvent('icnx:navigate', { 
+          detail: { tab: 'quick' } 
+        }));
+      }
+    } catch (err) {
+      console.error('Purged handler error', err);
+    }
+  }, [currentSessionId]);
+
+  // Start a new download session
+  const startDownloadSession = async () => {
+    if (runningRef.current || !queueRef.current?.length) {
+      return;
+    }
+
+    runningRef.current = true;
+    setStatus('Starting download session...');
+
+    try {
+      // Check if event listeners are ready
+      if (!(window as any).__icnxEventListenersReady) {
+        // Wait for listeners to be ready
+        await new Promise<void>((resolve) => {
+          const checkInterval = setInterval(() => {
+            if ((window as any).__icnxEventListenersReady) {
+              clearInterval(checkInterval);
+              resolve();
+            }
+          }, 50);
+          
+          // Timeout after 3 seconds
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            console.warn('Timed out waiting for event listeners, proceeding anyway');
+            resolve();
+          }, 3000);
+        });
+      }
+
+      // Mark session as active
+      (window as any).__icnxHasActiveSession = true;
+      (window as any).__icnxDownloadRunActive = true;
+      window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
+      setHasActiveSession(true);
+
+      // Start the download session
+      const sessionId = await invoke<string>('start_download_session', {
+        items: queueRef.current.map(it => ({
+          url: it.url,
+          filename: it.filename,
+          title: it.title,
+          type: it.type
+        })),
+        destination
+      });
+
+      // Update session ID
+      setCurrentSessionId(sessionId);
+      (window as any).__icnxCurrentSessionId = sessionId;
+      (window as any).__icnxActive = { kind: 'download', url: 'Multiple items' };
+
+      // Notify parent if needed
+      if (onStarted) onStarted();
+    } catch (err) {
+      console.error('Failed to start download session', err);
+      setStatus(`Failed to start download session: ${err}`);
+      runningRef.current = false;
+      
+      // Show error notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', {
+        detail: { type: 'error', message: 'Failed to start download session' }
+      }));
+    }
+  };
+
+  // Toggle pause/resume for the session
+  const togglePause = async () => {
+    if (pauseRequestInFlight || !currentSessionId) return;
+    
+    setPauseRequestInFlight(true);
+    
+    try {
+      if (isPaused) {
+        // Resume
+        await invoke('resume_download_session', { session_id: currentSessionId });
+        setStatus('Resuming session...');
+      } else {
+        // Pause
+        setStatus('Pausing session...');
+        
+        // Set a timeout to show UI feedback even if backend is slow
+        pauseTimeoutRef.current = window.setTimeout(() => {
+          setIsPaused(true);
+          setStatus('Session paused (client-side)');
+          setPauseRequestInFlight(false);
+        }, 800) as unknown as number;
+        
+        await invoke('pause_download_session', { session_id: currentSessionId });
+      }
+    } catch (err) {
+      console.error(`Failed to ${isPaused ? 'resume' : 'pause'} session`, err);
+      setStatus(`Failed to ${isPaused ? 'resume' : 'pause'} session: ${err}`);
+      setPauseRequestInFlight(false);
+      
+      // Clear pending timeout if any
+      if (pauseTimeoutRef.current) {
+        window.clearTimeout(pauseTimeoutRef.current);
+        pauseTimeoutRef.current = null;
+      }
+    }
+  };
+
+  // Retry failed downloads
+  const retryFailedItems = async () => {
+    if (!currentSessionId || !failedItems.length) return;
+    
+    setStatus('Retrying failed items...');
+    
+    try {
+      await invoke('retry_failed_downloads', { session_id: currentSessionId });
+      setFailedItems([]);
+      setStatus('Retrying failed items');
+      
+      // Show notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', {
+        detail: { type: 'success', message: 'Retrying failed downloads' }
+      }));
+    } catch (err) {
+      console.error('Failed to retry downloads', err);
+      setStatus(`Failed to retry: ${err}`);
+      
+      // Show error notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', {
+        detail: { type: 'error', message: 'Failed to retry downloads' }
+      }));
+    }
+  };
+
+  // Cancel the download session
+  const cancelSession = async () => {
+    if (!currentSessionId) return;
+    
+    const confirmCancel = window.confirm(
+      'Are you sure you want to cancel all downloads? This cannot be undone.'
+    );
+    
+    if (!confirmCancel) return;
+    
+    setStatus('Cancelling session...');
+    
+    try {
+      await invoke('cancel_download_session', { session_id: currentSessionId });
+      
+      // Reset state
+      setHasActiveSession(false);
+      (window as any).__icnxHasActiveSession = false;
+      (window as any).__icnxCurrentSessionId = undefined;
+      (window as any).__icnxActive = undefined;
+      
+      // Navigate back
+      onBack();
+      
+      // Show notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', {
+        detail: { type: 'info', message: 'Download session cancelled' }
+      }));
+    } catch (err) {
+      console.error('Failed to cancel session', err);
+      setStatus(`Failed to cancel session: ${err}`);
+      
+      // Show error notification
+      window.dispatchEvent(new CustomEvent('icnx:toast', {
+        detail: { type: 'error', message: 'Failed to cancel session' }
+      }));
+    }
+  };
+
+  // Close the session and navigate back
+  const closeSession = () => {
+    if (!canCloseSession) return;
+    
+    // Clear session data
+    try {
+      const g: any = window as any;
+      g.__icnxHasActiveSession = false;
+      g.__icnxCurrentSessionId = undefined;
+      g.__icnxSession = undefined;
+      g.__icnxSessionFinished = false;
+      g.__icnxActive = undefined;
+      delete g.__icnxProgress;
+    } catch (_) {}
+    
+    // Notify other components
+    window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
+    
+    // Navigate back
+    onBack();
+  };
+
+  // Calculate overall progress for all downloads
+  const calculateOverallProgress = () => {
+    const progressEntries = Object.values(progressMap).filter(Boolean);
+    
+    if (!progressEntries.length) return 0;
+    
+    const sum = progressEntries.reduce((acc, curr) => acc + (curr?.progress || 0), 0);
+    return sum / progressEntries.length;
+  };
+
+  // Format bytes to human-readable size
+  const formatBytes = (bytes: number | null | undefined) => {
+    if (bytes === null || bytes === undefined) return 'Unknown';
+    
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+  };
+
+  // Format speed to human-readable value
+  const formatSpeed = (bytesPerSecond: number | null | undefined) => {
+    if (bytesPerSecond === null || bytesPerSecond === undefined) return 'Unknown';
+    return `${formatBytes(bytesPerSecond)}/s`;
+  };
+
+  // Format ETA to human-readable time
+  const formatEta = (seconds: number | null | undefined) => {
+    if (seconds === null || seconds === undefined) return 'Unknown';
+    
+    if (seconds < 60) {
+      return `${Math.ceil(seconds)}s`;
+    } else if (seconds < 3600) {
+      return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${minutes}m`;
+    }
+  };
+
+  const overallProgress = calculateOverallProgress();
+  const activeDownloads = Object.values(progressMap).filter(
+    p => p && p.status && /(downloading|progress)/i.test(p.status)
+  ).length;
+  const completedDownloads = Object.values(progressMap).filter(
+    p => p && p.progress === 1
+  ).length;
+  const totalDownloads = uniqueItems.length;
+
+  return (
+    <div className="animate-fade-in space-y-6">
+      {/* Header */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-2xl font-bold text-white">Download Session</h1>
+          <div className="flex space-x-2">
+            {/* Session controls */}
+            {hasActiveSession && !sessionFinished && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={togglePause}
+                  disabled={pauseRequestInFlight || !currentSessionId}
+                >
+                  {isPaused ? (
+                    <>
+                      <Play size={16} className="mr-1.5" />
+                      Resume
+                    </>
+                  ) : (
+                    <>
+                      <Pause size={16} className="mr-1.5" />
+                      Pause
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={cancelSession}
+                  disabled={!currentSessionId}
+                >
+                  <X size={16} className="mr-1.5" />
+                  Cancel
+                </Button>
+              </>
+            )}
+            {/* Close button shown when session is finished */}
+            {sessionFinished && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={closeSession}
+                disabled={!canCloseSession}
+              >
+                Close Session
+              </Button>
+            )}
+          </div>
+        </div>
+        
+        <p className="text-gray-400 text-sm">
+          Destination: <span className="text-gray-200">{destination}</span>
+        </p>
+      </div>
+
+      {/* Progress overview */}
+      <Card className="p-5 bg-gray-800/50 border-gray-700">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium text-white">Download Progress</h2>
+            <div className="text-sm text-gray-400">
+              {completedDownloads} of {totalDownloads} completed
+              {activeDownloads > 0 && !isPaused && ` (${activeDownloads} active)`}
+              {isPaused && ' (Paused)'}
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full ${
+                sessionFinished
+                  ? 'bg-green-500'
+                  : isPaused
+                  ? 'bg-yellow-500'
+                  : 'bg-primary'
+              }`}
+              style={{ width: `${Math.round(overallProgress * 100)}%` }}
+            ></div>
+          </div>
+
+          {/* Status text */}
+          <div className="text-sm text-gray-300">{status}</div>
+
+          {/* Retry failed items button */}
+          {failedItems.length > 0 && (
+            <div className="mt-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={retryFailedItems}
+                className="text-yellow-400 border-yellow-700 hover:bg-yellow-900/30"
+              >
+                <RefreshCw size={14} className="mr-1.5" />
+                Retry {failedItems.length} Failed Items
+              </Button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Download items list */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-medium text-white">Downloads</h2>
+        
+        {uniqueItems.map((item) => {
+          const progress = progressMap[item.url];
+          const isComplete = progress?.progress === 1;
+          const isFailed = progress?.error || 
+                           (progress?.status && /(failed|error|cancelled)/i.test(progress.status));
+          const isPaused = progress?.status === 'paused';
+          
+          return (
+            <Card
+              key={item.url}
+              className={`p-4 border ${
+                isComplete
+                  ? 'border-green-700 bg-green-900/20'
+                  : isFailed
+                  ? 'border-red-700 bg-red-900/20'
+                  : isPaused
+                  ? 'border-yellow-700 bg-yellow-900/20'
+                  : 'border-gray-700 bg-gray-800/50'
+              }`}
+            >
+              <div className="space-y-2">
+                {/* Filename and status */}
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-medium text-white truncate max-w-md">
+                      {progress?.filename || item.filename || item.title || 'Unknown file'}
+                    </h3>
+                    <div className="text-xs text-gray-400 truncate max-w-md">{item.url}</div>
+                  </div>
+                  <div className="flex items-center">
+                    {isComplete && (
+                      <span className="text-green-400 text-sm flex items-center">
+                        <Check size={14} className="mr-1" />
+                        Complete
+                      </span>
+                    )}
+                    {isFailed && (
+                      <span className="text-red-400 text-sm">
+                        Failed: {progress?.error || 'Unknown error'}
+                      </span>
+                    )}
+                    {isPaused && (
+                      <span className="text-yellow-400 text-sm flex items-center">
+                        <Pause size={14} className="mr-1" />
+                        Paused
+                      </span>
+                    )}
+                    {!isComplete && !isFailed && !isPaused && progress && (
+                      <span className="text-blue-400 text-sm flex items-center">
+                        <Clock size={14} className="mr-1" />
+                        {progress.status || 'Downloading'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress details */}
+                {progress && (
+                  <div className="space-y-1.5">
+                    {/* Progress bar */}
+                    <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          isComplete
+                            ? 'bg-green-500'
+                            : isFailed
+                            ? 'bg-red-500'
+                            : isPaused
+                            ? 'bg-yellow-500'
+                            : 'bg-primary'
+                        }`}
+                        style={{ width: `${Math.round((progress.progress || 0) * 100)}%` }}
+                      ></div>
+                    </div>
+                    
+                    {/* Size, speed, ETA */}
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <div>
+                        {formatBytes(progress.downloaded)} 
+                        {progress.total ? ` / ${formatBytes(progress.total)}` : ''}
+                      </div>
+                      {!isComplete && !isFailed && (
+                        <div className="flex space-x-3">
+                          <span>{formatSpeed(progress.speed)}</span>
+                          {progress.eta !== null && progress.eta !== undefined && (
+                            <span>ETA: {formatEta(progress.eta)}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

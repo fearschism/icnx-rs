@@ -1,0 +1,14 @@
+{
+  "name": "Multi Test",
+  "description": "Emits multiple files to test batch downloads and selection UI.",
+  "version": "0.1.0",
+  "author": "ICNX",
+  "category": "testing",
+  "tags": ["test", "image"],
+  "icon": "🧪",
+  "website": "",
+  "supportedDomains": ["picsum.photos", "httpbin.org"],
+  "options": []
+}
+
+

@@ -1,0 +1,54 @@
+[package]
+name = "icnx"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.0", features = [] }
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+directories = "5.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+# Async & networking
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs", "time"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+reqwest = { version = "0.11", default-features = false, features = ["json", "gzip", "brotli", "deflate", "stream", "rustls-tls"] }
+scraper = "0.18"
+ureq = { version = "2.9", features = ["tls", "gzip", "brotli"] }
+
+# Tauri
+tauri = { version = "1.0", features = [ "http-all", "fs-read-file", "fs-remove-file", "fs-remove-dir", "fs-copy-file", "fs-read-dir", "dialog-open", "fs-write-file", "dialog-save", "shell-open", "path-all", "fs-exists", "fs-rename-file", "fs-create-dir"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+url = { version = "2.5", features = ["serde"] }
+bytes = "1.6"
+base64 = "0.22"
+mime_guess = "2.0"
+crossbeam-channel = "0.5"
+futures-util = "0.3"
+
+# Embedded JavaScript engine
+boa_engine = "0.17"
+
+# File system
+rfd = "0.14"
+rusqlite = { version = "0.29", features = ["bundled"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[dev-dependencies]
+tempfile = "3.6"
+hyper = { version = "0.14", features = ["full"] }

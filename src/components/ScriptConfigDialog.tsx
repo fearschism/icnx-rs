@@ -1,0 +1,306 @@
+import { useState, useEffect } from 'react';
+import { X, Play, Settings } from 'lucide-react';
+import type { ScriptInfo, ScriptOption, ScriptConfig } from '../types';
+
+interface ScriptConfigDialogProps {
+  script: ScriptInfo;
+  isOpen: boolean;
+  onClose: () => void;
+  onRun: (config: ScriptConfig) => void;
+}
+
+function ScriptConfigDialog({ script, isOpen, onClose, onRun }: ScriptConfigDialogProps) {
+  const [config, setConfig] = useState<ScriptConfig>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Initialize config with default values
+  useEffect(() => {
+    if (script.options) {
+      const defaultConfig: ScriptConfig = {};
+      script.options.forEach(option => {
+        if (option.default !== undefined) {
+          defaultConfig[option.id] = option.default;
+        }
+      });
+      setConfig(defaultConfig);
+    }
+  }, [script]);
+
+  const handleConfigChange = (optionId: string, value: any) => {
+    setConfig(prev => ({
+      ...prev,
+      [optionId]: value
+    }));
+    
+    // Clear error for this field
+    if (errors[optionId]) {
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[optionId];
+        return newErrors;
+      });
+    }
+  };
+
+  const validateConfig = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    
+    if (!script.options) return true;
+    
+    script.options.forEach(option => {
+      const value = config[option.id];
+      
+      // Required field validation
+      if (option.required && (value === undefined || value === '' || value === null)) {
+        newErrors[option.id] = `${option.label} is required`;
+        return;
+      }
+      
+      // Number validation
+      if (option.type === 'number' && value !== undefined && value !== '') {
+        const numValue = Number(value);
+        if (isNaN(numValue)) {
+          newErrors[option.id] = 'Must be a valid number';
+        } else {
+          if (option.min !== undefined && numValue < option.min) {
+            newErrors[option.id] = `Must be at least ${option.min}`;
+          }
+          if (option.max !== undefined && numValue > option.max) {
+            newErrors[option.id] = `Must be at most ${option.max}`;
+          }
+        }
+      }
+      
+      // Dependency validation
+      if (option.depends_on) {
+        const dependentValue = config[option.depends_on.option];
+        if (dependentValue === option.depends_on.value && option.required && !value) {
+          newErrors[option.id] = `${option.label} is required when ${option.depends_on.option} is ${option.depends_on.value}`;
+        }
+      }
+    });
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleRun = () => {
+    if (validateConfig()) {
+      onRun(config);
+      onClose();
+    }
+  };
+
+  const isOptionVisible = (option: ScriptOption): boolean => {
+    if (!option.depends_on) return true;
+    
+    const dependentValue = config[option.depends_on.option];
+    return dependentValue === option.depends_on.value;
+  };
+
+  const renderOption = (option: ScriptOption) => {
+    if (!isOptionVisible(option)) return null;
+    
+    const value = config[option.id] ?? '';
+    const hasError = errors[option.id];
+    
+    const baseInputClasses = `w-full px-3 py-2 bg-gray-800 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 transition-colors ${
+      hasError ? 'border-red-500 focus:ring-red-500' : 'border-gray-600 focus:ring-blue-500'
+    }`;
+
+    switch (option.type) {
+      case 'text':
+        return (
+          <div key={option.id} className="space-y-2">
+            <label className="block text-sm font-medium text-gray-200">
+              {option.label}
+              {option.required && <span className="text-red-400 ml-1">*</span>}
+            </label>
+            {option.description && (
+              <p className="text-xs text-gray-400">{option.description}</p>
+            )}
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => handleConfigChange(option.id, e.target.value)}
+              placeholder={option.placeholder}
+              className={baseInputClasses}
+            />
+            {hasError && <p className="text-xs text-red-400">{hasError}</p>}
+          </div>
+        );
+
+      case 'number':
+        return (
+          <div key={option.id} className="space-y-2">
+            <label className="block text-sm font-medium text-gray-200">
+              {option.label}
+              {option.required && <span className="text-red-400 ml-1">*</span>}
+            </label>
+            {option.description && (
+              <p className="text-xs text-gray-400">{option.description}</p>
+            )}
+            <input
+              type="number"
+              value={value}
+              onChange={(e) => handleConfigChange(option.id, e.target.value)}
+              min={option.min}
+              max={option.max}
+              className={baseInputClasses}
+            />
+            {hasError && <p className="text-xs text-red-400">{hasError}</p>}
+          </div>
+        );
+
+      case 'select':
+        return (
+          <div key={option.id} className="space-y-2">
+            <label className="block text-sm font-medium text-gray-200">
+              {option.label}
+              {option.required && <span className="text-red-400 ml-1">*</span>}
+            </label>
+            {option.description && (
+              <p className="text-xs text-gray-400">{option.description}</p>
+            )}
+            <select
+              value={value}
+              onChange={(e) => handleConfigChange(option.id, e.target.value)}
+              className={baseInputClasses}
+            >
+              {!option.required && <option value="">-- Select an option --</option>}
+              {option.options?.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {hasError && <p className="text-xs text-red-400">{hasError}</p>}
+          </div>
+        );
+
+      case 'radio':
+        return (
+          <div key={option.id} className="space-y-2">
+            <label className="block text-sm font-medium text-gray-200">
+              {option.label}
+              {option.required && <span className="text-red-400 ml-1">*</span>}
+            </label>
+            {option.description && (
+              <p className="text-xs text-gray-400">{option.description}</p>
+            )}
+            <div className="space-y-2">
+              {option.options?.map((opt) => (
+                <label key={opt.value} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name={option.id}
+                    value={opt.value}
+                    checked={value === opt.value}
+                    onChange={(e) => handleConfigChange(option.id, e.target.value)}
+                    className="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-300">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+            {hasError && <p className="text-xs text-red-400">{hasError}</p>}
+          </div>
+        );
+
+      case 'checkbox':
+        return (
+          <div key={option.id} className="space-y-2">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={value || false}
+                onChange={(e) => handleConfigChange(option.id, e.target.checked)}
+                className="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-200">
+                {option.label}
+                {option.required && <span className="text-red-400 ml-1">*</span>}
+              </span>
+            </label>
+            {option.description && (
+              <p className="text-xs text-gray-400 ml-6">{option.description}</p>
+            )}
+            {hasError && <p className="text-xs text-red-400 ml-6">{hasError}</p>}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-700">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+              {script.icon ? (
+                <span className="text-xl">{script.icon}</span>
+              ) : (
+                <Settings className="w-5 h-5 text-white" />
+              )}
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-white">Configure {script.name}</h2>
+              <p className="text-sm text-gray-400">{script.description}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 overflow-y-auto max-h-[60vh]">
+          {script.options && script.options.length > 0 ? (
+            <div className="space-y-6">
+              {script.options.map(renderOption)}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Settings className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-400">This script has no configuration options.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between p-6 border-t border-gray-700">
+          <div className="text-sm text-gray-400">
+            {script.author && `By ${script.author}`}
+            {script.version && ` • v${script.version}`}
+          </div>
+          <div className="flex space-x-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRun}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <Play className="w-4 h-4" />
+              <span>Run Script</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default ScriptConfigDialog;
