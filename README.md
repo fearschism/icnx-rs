@@ -1,94 +1,97 @@
-# ICNX - Rust Downloader with Embedded JavaScript Runtime
+# ICNX - Intelligent Content Downloader
 
-A Rust-based downloader engine with embedded JavaScript runtime for running standalone scraper scripts. Features a desktop GUI built with the Iced library.
+A powerful Rust-based downloader with **Python scripting engine** for automated web scraping and content extraction. Features intelligent URL detection, comprehensive library support, and a modern desktop interface.
 
-## Features
+## ✨ Features
 
-- **Quick Download**: Direct URL download with progress tracking
-- **Installed Scripts**: Run JavaScript scraper scripts that emit download metadata
-- **JavaScript Runtime**: Simple parser for `emit()` calls (no Node.js required)
-- **Robust Downloader**: Uses reqwest with redirects, compression, retries, and concurrency
-- **Cross-platform GUI**: Built with Iced framework
+- **🐍 Python Scripting Engine**: Full PyO3 integration with requests, BeautifulSoup, pandas, numpy
+- **🔍 Smart URL Detection**: Automatically detects and suggests scripts based on domain matching  
+- **⚡ Enhanced IDE**: Monaco editor with Python syntax highlighting, linting, and completions
+- **📦 Zero Configuration**: Scripts use embedded `__meta__` dictionaries - no separate config files
+- **🚀 High Performance**: Concurrent downloads with progress tracking and session management
+- **🎯 Quick Download**: Paste any URL and start downloading immediately
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 src/
-├── core/           # JavaScript runtime and data models
-├── downloader/     # HTTP download engine with queue management
-├── data/           # Settings and history persistence
-└── ui/             # Iced GUI components and views
+├── core/              # Python runtime engine (PyO3)
+├── downloader/        # Multi-threaded download engine  
+├── components/        # React UI components
+├── pages/             # Application views
+└── commands.rs        # Tauri backend commands
 ```
 
-## Script Format
+## 📝 Script Format
 
-Scripts are stored in `scripts/` folders with:
-- `script.js` - The scraper code
-- `manifest.json` - Metadata (name, description, version)
+Scripts use embedded Python metadata:
 
-Example script:
-```javascript
-const data = {
-  dir: "downloads/example",
-  items: [
-    {
-      url: "https://httpbin.org/image/png",
-      filename: "example.png",
-      title: "Example Image",
-      type: "image",
-      headers: { "User-Agent": "ICNX-Script/0.1" }
-    }
-  ]
-};
+```python
+__meta__ = {
+    "name": "GitHub Trending Scraper",
+    "author": "ICNX Team",
+    "version": "1.0.0",
+    "description": "Scrapes trending repositories from GitHub",
+    "supportedDomains": ["github.com", "*.github.com"],
+    "options": [
+        {
+            "id": "language",
+            "type": "select", 
+            "label": "Programming Language",
+            "default": "all",
+            "options": [
+                {"value": "python", "label": "Python"},
+                {"value": "rust", "label": "Rust"}
+            ]
+        }
+    ]
+}
 
-emit(data);
+def onResolve(url, ctx):
+    # Access Python libraries
+    import requests
+    from bs4 import BeautifulSoup
+    
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    # Process and emit results
+    ctx.emit({
+        "dir": "github-trending",
+        "items": [/* extracted items */]
+    })
 ```
 
-## Build & Run
+## 🚀 Quick Start
 
 ### Prerequisites
-- Rust 1.70+ 
-- macOS/Windows/Linux
+- **Rust** 1.70+ ([rustup.rs](https://rustup.rs/))
+- **Node.js** 18+ ([nodejs.org](https://nodejs.org/))
+- **Python** 3.8+ (for PyO3 integration)
+- **System dependencies**:
+  - macOS: Xcode Command Line Tools
+  - Linux: `build-essential`, `libssl-dev`, `pkg-config`
+  - Windows: Visual Studio Build Tools
 
-### Commands
+### Installation
+
 ```bash
-# Clone and build
-git clone <repo>
-cd icnx
-cargo build --release
-
-# Run
-cargo run
+# Clone and run
+git clone https://github.com/fearschism/icnx-rs.git
+cd icnx-rs
+npm install
+npm run tauri dev
 ```
 
-## Usage
+**Just paste a URL and ICNX will detect the right script automatically!**
 
-1. **Quick Download**: Enter a URL and click Download
-2. **Installed Scripts**: Click "Run Example" to test the sample script
-3. **Script Execution**: Scripts parse and emit JSON, which queues downloads
+## 🛠️ Tech Stack
 
-## Current Status (POC)
+- **Backend**: Rust + Tauri + PyO3 
+- **Frontend**: React + TypeScript + Vite
+- **Python Libraries**: requests, beautifulsoup4, lxml, pandas, numpy
+- **Cross-Platform**: macOS, Windows, Linux support via Tauri
 
-✅ Working:
-- Basic GUI with navigation tabs
-- Quick download functionality  
-- Script parsing and execution
-- Download queue integration
-- Example script included
+---
 
-🚧 TODO:
-- Gallery view for download history
-- Community script browsing
-- Settings persistence
-- Progress bars and cancellation
-- Script installation/management
-
-## Dependencies
-
-- `iced` - Cross-platform GUI framework
-- `reqwest` - HTTP client with compression
-- `serde` - JSON serialization
-- `tokio` - Async runtime
-- `anyhow` - Error handling
-
-No heavy JavaScript engines (V8/QuickJS) - uses simple text parsing for POC.
+Built with ❤️ using Rust, Python, and modern web technologies.
