@@ -1,14 +1,12 @@
 use std::path::PathBuf;
 use tauri::{command, Manager};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::core::model::{EmitPayload, DownloadItem};
-use crate::core::runtime::JsEngine;
-use crate::data::{Settings, load_settings, load_history, save_history, DownloadRecord, History};
+use crate::data::{Settings, load_settings, load_history, save_history, DownloadRecord};
 use tauri::api::shell;
 use crate::downloader::{Downloader, QueueItem, DownloadStatus};
 
@@ -363,10 +361,11 @@ fn split_name_ext(name: &str) -> (String, Option<String>) {
 #[command]
 pub async fn run_script(app: tauri::AppHandle, script_name: String, options: Option<serde_json::Value>) -> Result<EmitPayload, String> {
     // Accept either script folder name or manifest name
-    let mut script_path = PathBuf::from("scripts").join(&script_name).join("script.js");
-    if !script_path.exists() {
-        // try to resolve by manifest name
-        let scripts_dir = PathBuf::from("scripts");
+    let scripts_dir = PathBuf::from("scripts");
+    let mut script_dir = scripts_dir.join(&script_name);
+    
+    // If direct folder doesn't exist, try to resolve by manifest name
+    if !script_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&scripts_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
@@ -376,7 +375,7 @@ pub async fn run_script(app: tauri::AppHandle, script_name: String, options: Opt
                         if let Ok(content) = std::fs::read_to_string(&manifest_path) {
                             if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&content) {
                                 if manifest["name"].as_str().unwrap_or("") == script_name {
-                                    script_path = p.join("script.js");
+                                    script_dir = p;
                                     break;
                                 }
                             }
@@ -387,26 +386,34 @@ pub async fn run_script(app: tauri::AppHandle, script_name: String, options: Opt
         }
     }
     
-    match std::fs::read_to_string(&script_path) {
-        Ok(source) => {
-            let (sender, _receiver) = crossbeam_channel::unbounded();
-            match JsEngine::new(sender, Some(app.clone())) {
-                Ok(engine) => {
-                    match engine.execute_script_with_options(&script_name, &source, options) {
-                        Ok(_) => {
-                            if let Some(payload) = engine.get_result() {
-                                Ok(payload)
-                            } else {
-                                Err("Script did not emit any data".to_string())
+    // Look for Python script only
+    let python_script = script_dir.join("script.py");
+    
+    if python_script.exists() {
+        // Execute Python script
+        match std::fs::read_to_string(&python_script) {
+            Ok(source) => {
+                let (sender, _receiver) = crossbeam_channel::unbounded();
+                match crate::core::python_runtime::PythonEngine::new(sender, Some(app.clone())) {
+                    Ok(engine) => {
+                        match engine.execute_script_with_options(&script_name, &source, options) {
+                            Ok(_) => {
+                                if let Some(payload) = engine.get_result() {
+                                    Ok(payload)
+                                } else {
+                                    Err("Python script did not emit any data".to_string())
+                                }
                             }
+                            Err(e) => Err(format!("Python script execution error: {}", e))
                         }
-                        Err(e) => Err(format!("Script execution error: {}", e))
                     }
+                    Err(e) => Err(format!("Python engine error: {}", e))
                 }
-                Err(e) => Err(format!("Engine error: {}", e))
             }
+            Err(e) => Err(format!("Failed to read Python script: {}", e))
         }
-        Err(e) => Err(format!("Failed to read script: {}", e))
+    } else {
+        Err(format!("No Python script found in directory: {} (looking for script.py)", script_dir.display()))
     }
 }
 
@@ -426,6 +433,33 @@ pub async fn get_installed_scripts() -> Result<Vec<ScriptInfo>, String> {
                 if let Ok(entry) = entry {
                     let path = entry.path();
                     if path.is_dir() {
+                        // Look for script.py file first (new __meta__ approach)
+                        let script_path = path.join("script.py");
+                        if script_path.exists() {
+                            match parse_python_script_meta(&script_path) {
+                                Ok(script_info) => {
+                                    scripts.push(ScriptInfo {
+                                        name: script_info.name,
+                                        description: script_info.description,
+                                        version: script_info.version,
+                                        author: script_info.author,
+                                        category: script_info.category,
+                                        tags: script_info.tags,
+                                        icon: script_info.icon,
+                                        website: script_info.website,
+                                        supported_domains: script_info.supported_domains,
+                                        options: script_info.options,
+                                        dir: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                    });
+                                    continue;
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to parse Python script meta for {}: {}", script_path.display(), e);
+                                }
+                            }
+                        }
+                        
+                        // Fallback to manifest.json for backwards compatibility
                         let manifest_path = path.join("manifest.json");
                         if manifest_path.exists() {
                             match std::fs::read_to_string(&manifest_path) {
@@ -581,9 +615,30 @@ pub struct ScriptFileResponse {
     pub code: String,
 }
 
+#[tauri::command]
+pub async fn run_script_playground(code: String, app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    use crate::core::python_runtime::PythonEngine;
+    
+    // Create a dummy sender for playground mode
+    let (tx, _rx) = crossbeam_channel::unbounded();
+    let engine = PythonEngine::new(tx, Some(app_handle)).map_err(|e| e.to_string())?;
+    
+    // For playground mode, we can execute the code directly as an inline script
+    engine.execute_script("playground", &code).map_err(|e| e.to_string())?;
+    
+    // Return result from Python execution
+    if let Some(payload) = engine.get_result() {
+        Ok(serde_json::to_value(payload).unwrap_or_else(|_| serde_json::json!({"status": "success", "message": "Python script executed"})))
+    } else {
+        Ok(serde_json::json!({"status": "success", "message": "Python script executed"}))
+    }
+}
+
 fn resolve_script_dir(script_name_or_dir: &str) -> Option<PathBuf> {
     let direct = PathBuf::from("scripts").join(script_name_or_dir);
-    if direct.join("script.js").exists() { return Some(direct); }
+    if direct.join("script.py").exists() { 
+        return Some(direct); 
+    }
     // search by manifest name
     let scripts_dir = PathBuf::from("scripts");
     if let Ok(entries) = std::fs::read_dir(&scripts_dir) {
@@ -610,11 +665,26 @@ fn resolve_script_dir(script_name_or_dir: &str) -> Option<PathBuf> {
 pub async fn get_script(script_name_or_dir: String) -> Result<ScriptFileResponse, String> {
     let Some(dir) = resolve_script_dir(&script_name_or_dir) else { return Err("Script not found".into()) };
     let manifest_path = dir.join("manifest.json");
-    let script_path = dir.join("script.js");
+    
+    // Check for Python script only
+    let python_script = dir.join("script.py");
+    
+    if !python_script.exists() {
+        return Err("No Python script file found (script.py)".into());
+    }
+    
     let manifest = std::fs::read_to_string(&manifest_path).map_err(|e| format!("read manifest failed: {}", e))?;
-    let code = std::fs::read_to_string(&script_path).map_err(|e| format!("read script failed: {}", e))?;
-    let manifest_json: serde_json::Value = serde_json::from_str(&manifest).map_err(|e| format!("parse manifest failed: {}", e))?;
-    Ok(ScriptFileResponse { dir: dir.file_name().unwrap_or_default().to_string_lossy().to_string(), manifest: manifest_json, code })
+    let code = std::fs::read_to_string(&python_script).map_err(|e| format!("read script failed: {}", e))?;
+    let mut manifest_json: serde_json::Value = serde_json::from_str(&manifest).map_err(|e| format!("parse manifest failed: {}", e))?;
+    
+    // Add script type to manifest
+    manifest_json["scriptType"] = serde_json::Value::String("python".to_string());
+    
+    Ok(ScriptFileResponse { 
+        dir: dir.file_name().unwrap_or_default().to_string_lossy().to_string(), 
+        manifest: manifest_json, 
+        code 
+    })
 }
 
 #[command]
@@ -990,4 +1060,212 @@ pub async fn migrate_json_history_to_db(app: tauri::AppHandle) -> Result<(), Str
         }
         Err(e) => Err(format!("failed to read legacy history.json: {}", e)),
     }
+}
+
+// Python package management commands
+
+#[command]
+pub async fn setup_python_environment() -> Result<String, String> {
+    use crate::core::python_runtime::PythonLibraryManager;
+    
+    match PythonLibraryManager::setup_environment() {
+        Ok(()) => Ok("Python environment setup completed successfully".to_string()),
+        Err(e) => Err(format!("Failed to setup Python environment: {}", e)),
+    }
+}
+
+#[command]
+pub async fn install_python_packages(packages: Vec<String>) -> Result<String, String> {
+    use crate::core::python_runtime::PythonLibraryManager;
+    
+    let package_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+    match PythonLibraryManager::install_packages(&package_refs) {
+        Ok(()) => Ok(format!("Successfully installed packages: {}", packages.join(", "))),
+        Err(e) => Err(format!("Failed to install packages: {}", e)),
+    }
+}
+
+#[command]
+pub async fn check_python_packages(packages: Vec<String>) -> Result<Vec<(String, bool)>, String> {
+    use crate::core::python_runtime::PythonLibraryManager;
+    
+    let package_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+    match PythonLibraryManager::check_packages(&package_refs) {
+        Ok(results) => Ok(results),
+        Err(e) => Err(format!("Failed to check packages: {}", e)),
+    }
+}
+
+#[command]
+pub async fn install_python_essentials() -> Result<String, String> {
+    use crate::core::python_runtime::PythonLibraryManager;
+    
+    match PythonLibraryManager::install_essentials() {
+        Ok(()) => Ok("Successfully installed essential Python packages for web scraping".to_string()),
+        Err(e) => Err(format!("Failed to install essential packages: {}", e)),
+    }
+}
+
+#[command]
+pub async fn detect_scripts_for_url(url: String) -> Result<Vec<ScriptInfo>, String> {
+    let scripts = get_installed_scripts().await?;
+    
+    // Parse the URL to extract domain
+    let parsed_url = match url::Url::parse(&url) {
+        Ok(u) => u,
+        Err(_) => return Ok(vec![]), // Invalid URL, no matches
+    };
+    
+    let domain = parsed_url.host_str().unwrap_or("");
+    let full_host = parsed_url.host_str().unwrap_or("");
+    
+    // Filter scripts that support this domain
+    let matching_scripts: Vec<ScriptInfo> = scripts.into_iter()
+        .filter(|script| {
+            if let Some(ref domains) = script.supported_domains {
+                domains.iter().any(|supported_domain| {
+                    // Check for exact domain match
+                    if domain == supported_domain {
+                        return true;
+                    }
+                    
+                    // Check for subdomain match (e.g., "news.ycombinator.com" matches "ycombinator.com")
+                    if domain.ends_with(&format!(".{}", supported_domain)) {
+                        return true;
+                    }
+                    
+                    // Check for pattern matching (e.g., "*.github.com" matches "github.com")
+                    if supported_domain.starts_with("*.") {
+                        let pattern = &supported_domain[2..]; // Remove "*."
+                        if domain == pattern || domain.ends_with(&format!(".{}", pattern)) {
+                            return true;
+                        }
+                    }
+                    
+                    // Check for protocol-aware matching
+                    if supported_domain.starts_with("http") {
+                        if let Ok(supported_url) = url::Url::parse(supported_domain) {
+                            if let Some(supported_host) = supported_url.host_str() {
+                                return domain == supported_host;
+                            }
+                        }
+                    }
+                    
+                    false
+                })
+            } else {
+                // No supported domains specified - this script doesn't match any specific URL
+                false
+            }
+        })
+        .collect();
+    
+    Ok(matching_scripts)
+}
+
+// Parse __meta__ from Python script
+fn parse_python_script_meta(script_path: &PathBuf) -> Result<ScriptInfo, String> {
+    let content = std::fs::read_to_string(script_path)
+        .map_err(|e| format!("Failed to read script file: {}", e))?;
+    
+    // Find __meta__ = { ... } in the Python file
+    let lines: Vec<&str> = content.lines().collect();
+    let mut meta_start = None;
+    let mut brace_count = 0;
+    let mut in_meta = false;
+    let mut meta_lines = Vec::new();
+    
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        
+        if trimmed.starts_with("__meta__") && trimmed.contains("=") && trimmed.contains("{") {
+            meta_start = Some(i);
+            in_meta = true;
+            // Count braces in this line
+            for ch in trimmed.chars() {
+                match ch {
+                    '{' => brace_count += 1,
+                    '}' => brace_count -= 1,
+                    _ => {}
+                }
+            }
+            // Start collecting from the opening brace
+            if let Some(pos) = trimmed.find('{') {
+                meta_lines.push(&trimmed[pos..]);
+            }
+            
+            if brace_count == 0 {
+                break; // Single line __meta__
+            }
+        } else if in_meta {
+            meta_lines.push(line);
+            // Count braces
+            for ch in line.chars() {
+                match ch {
+                    '{' => brace_count += 1,
+                    '}' => brace_count -= 1,
+                    _ => {}
+                }
+            }
+            if brace_count == 0 {
+                break; // End of __meta__
+            }
+        }
+    }
+    
+    if meta_lines.is_empty() {
+        return Err("No __meta__ found in Python script".to_string());
+    }
+    
+    // Join the meta lines and try to parse as JSON-like syntax
+    let meta_content = meta_lines.join("\n");
+    
+    // Convert Python dict syntax to JSON
+    let json_content = python_dict_to_json(&meta_content)
+        .map_err(|e| format!("Failed to convert Python dict to JSON: {}", e))?;
+    
+    // Parse the JSON
+    let meta: serde_json::Value = serde_json::from_str(&json_content)
+        .map_err(|e| format!("Failed to parse meta JSON: {}", e))?;
+    
+    Ok(ScriptInfo {
+        name: meta["name"].as_str().unwrap_or("Unknown").to_string(),
+        description: meta["description"].as_str().unwrap_or("").to_string(),
+        version: meta["version"].as_str().unwrap_or("0.1.0").to_string(),
+        author: meta["author"].as_str().unwrap_or("Unknown").to_string(),
+        category: meta["category"].as_str().map(|s| s.to_string()),
+        tags: meta["tags"].as_array()
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()),
+        icon: meta["icon"].as_str().map(|s| s.to_string()),
+        website: meta["website"].as_str().map(|s| s.to_string()),
+        supported_domains: meta["supportedDomains"].as_array()
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()),
+        options: parse_script_options(&meta["options"]),
+        dir: script_path.parent()
+            .and_then(|p| p.file_name())
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+    })
+}
+
+// Convert Python dict syntax to JSON
+fn python_dict_to_json(python_dict: &str) -> Result<String, String> {
+    let mut result = python_dict.to_string();
+    
+    // Replace Python boolean values
+    result = result.replace("True", "true");
+    result = result.replace("False", "false");
+    result = result.replace("None", "null");
+    
+    // This is a simple conversion - for production, you'd want a proper Python parser
+    // But for our __meta__ use case, this should work fine
+    
+    Ok(result)
 }

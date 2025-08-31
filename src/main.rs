@@ -14,6 +14,7 @@ fn main() {
         commands::quick_download,
         commands::download_with_progress,
         commands::run_script,
+        commands::run_script_playground,
         commands::get_installed_scripts,
         commands::save_script,
         commands::get_script,
@@ -31,6 +32,11 @@ fn main() {
         ,commands::cancel_download_session
         ,commands::pause_download_session
         ,commands::resume_download_session
+        ,commands::setup_python_environment
+        ,commands::install_python_packages
+        ,commands::check_python_packages
+        ,commands::install_python_essentials
+        ,commands::detect_scripts_for_url
     ])
         .setup(|app| {
             // Initialize app state

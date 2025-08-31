@@ -35,6 +35,11 @@ export default function DownloadCard({
 }: Props) {
   const [status, setStatus] = useState<string>(isScrape ? 'Scraping' : 'Queued');
   const [progress, setProgress] = useState<number | null>(null);
+  const [statistics, setStatistics] = useState<{
+    downloaded: number;
+    skipped: number;
+    failed: number;
+  }>({ downloaded: 0, skipped: 0, failed: 0 });
   
   // Connect to global progress system
   useEffect(() => {
@@ -51,6 +56,11 @@ export default function DownloadCard({
         setProgress(typeof initialData.progress === 'number' 
           ? Math.round((initialData.progress || 0) * 100) 
           : null);
+        setStatistics({
+          downloaded: initialData.items_downloaded || 0,
+          skipped: initialData.items_skipped || 0,
+          failed: initialData.items_failed || 0
+        });
       }
       
       // Subscribe to progress updates
@@ -60,6 +70,11 @@ export default function DownloadCard({
           setProgress(typeof data.progress === 'number' 
             ? Math.round((data.progress || 0) * 100) 
             : null);
+          setStatistics({
+            downloaded: data.items_downloaded || 0,
+            skipped: data.items_skipped || 0,
+            failed: data.items_failed || 0
+          });
         }
       });
     } else {
@@ -90,6 +105,11 @@ export default function DownloadCard({
       setProgress(typeof progressData.progress === 'number' 
         ? Math.round((progressData.progress || 0) * 100) 
         : null);
+      setStatistics({
+        downloaded: progressData.items_downloaded || 0,
+        skipped: progressData.items_skipped || 0,
+        failed: progressData.items_failed || 0
+      });
     }
   }, [progressData, url]);
 
@@ -138,6 +158,7 @@ export default function DownloadCard({
             
             // Update the global progress system if available
             if (window.__icnxProgressSystem) {
+              const current = window.__icnxProgressSystem.getProgress(url);
               window.__icnxProgressSystem.updateProgress(url, {
                 progress: isCompleted ? 1 : (p.progress || 0),
                 downloaded: p.downloaded || 0,
@@ -147,7 +168,10 @@ export default function DownloadCard({
                 status: isCompleted ? 'completed' : (p.status || 'downloading'),
                 url: url,
                 filename: p.filename || filename || '',
-                error: p.error
+                error: p.error,
+                items_downloaded: p.items_downloaded || current?.items_downloaded || 0,
+                items_skipped: p.items_skipped || current?.items_skipped || 0,
+                items_failed: p.items_failed || current?.items_failed || 0
               });
             }
           }
@@ -157,6 +181,16 @@ export default function DownloadCard({
       const unStarted = await listen<any>('download_item_started', (e) => { 
         if (mounted && e.payload?.url === url) {
           setStatus('Downloading');
+          
+          try {
+            // Show info toast
+            window.dispatchEvent(new CustomEvent('icnx:toast', { 
+              detail: { 
+                type: 'info', 
+                message: `Starting download: ${filename || new URL(url).pathname.split('/').pop() || 'file'}` 
+              } 
+            }));
+          } catch (_) {}
           
           // Update global progress system
           if (window.__icnxProgressSystem) {
@@ -169,6 +203,9 @@ export default function DownloadCard({
               status: 'downloading',
               url: url,
               filename: filename || '',
+              items_downloaded: 0,
+              items_skipped: 0,
+              items_failed: 0
             };
             
             window.__icnxProgressSystem.updateProgress(url, {
@@ -184,6 +221,14 @@ export default function DownloadCard({
           setStatus('Completed'); 
           setProgress(100);
           try {
+            // Show success toast
+            window.dispatchEvent(new CustomEvent('icnx:toast', { 
+              detail: { 
+                type: 'success', 
+                message: `Downloaded: ${filename || new URL(url).pathname.split('/').pop() || 'file'}` 
+              } 
+            }));
+            
             // notify parent lists so they can auto-close cards if desired
             const ev = new CustomEvent('icnx:download-card-completed', { detail: { id, url } });
             window.dispatchEvent(ev);
@@ -202,12 +247,18 @@ export default function DownloadCard({
               status: 'completed',
               url: url,
               filename: filename || e.payload?.filename || '',
+              items_downloaded: 0,
+              items_skipped: 0,
+              items_failed: 0
             };
             
             window.__icnxProgressSystem.updateProgress(url, {
               ...current,
               progress: 1,
-              status: 'completed'
+              status: 'completed',
+              items_downloaded: e.payload?.items_downloaded || current.items_downloaded || 1,
+              items_skipped: e.payload?.items_skipped || current.items_skipped || 0,
+              items_failed: e.payload?.items_failed || current.items_failed || 0
             });
           }
         } 
@@ -216,6 +267,16 @@ export default function DownloadCard({
       const unError = await listen<any>('download_item_error', (e) => { 
         if (mounted && e.payload?.url === url) {
           setStatus('Failed');
+          
+          try {
+            // Show error toast
+            window.dispatchEvent(new CustomEvent('icnx:toast', { 
+              detail: { 
+                type: 'error', 
+                message: `Download failed: ${filename || new URL(url).pathname.split('/').pop() || 'file'} - ${e.payload?.error || 'Unknown error'}` 
+              } 
+            }));
+          } catch (_) {}
           
           // Update global progress system
           if (window.__icnxProgressSystem) {
@@ -228,13 +289,17 @@ export default function DownloadCard({
               status: 'failed',
               url: url,
               filename: filename || '',
-              error: e.payload?.error || 'Unknown error'
+              error: e.payload?.error || 'Unknown error',
+              items_downloaded: 0,
+              items_skipped: 0,
+              items_failed: 0
             };
             
             window.__icnxProgressSystem.updateProgress(url, {
               ...current,
               status: 'failed',
-              error: e.payload?.error || 'Unknown error'
+              error: e.payload?.error || 'Unknown error',
+              items_failed: (current.items_failed || 0) + 1
             });
           }
         }
@@ -519,6 +584,17 @@ export default function DownloadCard({
             };
             doCancel().then(() => {
               setStatus('Cancelled');
+              
+              try {
+                // Show cancellation toast
+                window.dispatchEvent(new CustomEvent('icnx:toast', { 
+                  detail: { 
+                    type: 'info', 
+                    message: `Download cancelled: ${filename || new URL(url).pathname.split('/').pop() || 'file'}` 
+                  } 
+                }));
+              } catch (_) {}
+              
               // Update global progress system so other components reflect cancellation
               try {
                 if (window.__icnxProgressSystem) {
@@ -568,6 +644,26 @@ export default function DownloadCard({
             </div>
           </div>
           <div className="text-xs text-gray-400 truncate">{destination}</div>
+          {/* Download Statistics */}
+          {(statistics.downloaded > 0 || statistics.skipped > 0 || statistics.failed > 0) && (
+            <div className="flex items-center gap-3 mt-1 text-xs">
+              {statistics.downloaded > 0 && (
+                <span className="text-green-400">
+                  ✓ {statistics.downloaded} downloaded
+                </span>
+              )}
+              {statistics.skipped > 0 && (
+                <span className="text-yellow-400">
+                  ⊘ {statistics.skipped} skipped
+                </span>
+              )}
+              {statistics.failed > 0 && (
+                <span className="text-red-400">
+                  ✗ {statistics.failed} failed
+                </span>
+              )}
+            </div>
+          )}
           <div className="mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden w-full">
             <div className="h-full bg-green-500" style={{ width: progress ? `${progress}%` : '4%' }} />
           </div>

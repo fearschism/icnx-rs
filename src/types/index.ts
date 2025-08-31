@@ -22,11 +22,12 @@ export interface ScriptInfo {
   website?: string;
   supportedDomains?: string[];
   options?: ScriptOption[];
+  scriptType?: 'python' | 'javascript';
 }
 
 export interface ScriptOption {
   id: string;
-  type: 'text' | 'number' | 'select' | 'radio' | 'checkbox';
+  type: 'text' | 'url' | 'path' | 'number' | 'bool' | 'select' | 'radio' | 'multiselect' | 'range' | 'tags' | 'object';
   label: string;
   description?: string;
   required?: boolean;
@@ -34,11 +35,14 @@ export interface ScriptOption {
   placeholder?: string;
   min?: number;
   max?: number;
+  step?: number;
   options?: { label: string; value: string }[];
   depends_on?: {
     option: string;
     value: string;
   };
+  pattern?: string;
+  properties?: Record<string, ScriptOption>;
 }
 
 export interface ScriptConfig {
@@ -82,6 +86,10 @@ export interface DownloadProgress {
   url: string;
   filename: string;
   error?: string;
+  // Download statistics
+  items_downloaded?: number;
+  items_skipped?: number;
+  items_failed?: number;
 }
 
 // Progress system interface used by components like DownloadCard / QuickDownload.

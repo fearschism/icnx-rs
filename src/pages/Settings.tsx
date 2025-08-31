@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { FolderOpen, Save, RotateCcw } from 'lucide-react';
+import { FolderOpen, Save, RotateCcw, Download, Check, X, RefreshCw, Package } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -237,6 +237,9 @@ function Settings() {
           </div>
         </Card>
 
+        {/* Python Packages Management */}
+        <PythonPackagesCard />
+
         {/* Actions */}
         <div className="flex justify-between items-center">
           <Button
@@ -269,6 +272,173 @@ function Settings() {
         )}
       </div>
     </div>
+  );
+}
+
+// Python Packages Management Component
+function PythonPackagesCard() {
+  const [packages, setPackages] = useState<Array<{name: string, installed: boolean}>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [installStatus, setInstallStatus] = useState('');
+  const [isInstalling, setIsInstalling] = useState(false);
+
+  const essentialPackages = [
+    'requests',
+    'beautifulsoup4', 
+    'lxml',
+    'pandas',
+    'numpy',
+    'urllib3',
+    'certifi'
+  ];
+
+  useEffect(() => {
+    checkPackages();
+  }, []);
+
+  const checkPackages = async () => {
+    setIsLoading(true);
+    try {
+      // Map BS4 import name to package name
+      const checkNames = essentialPackages.map(pkg => 
+        pkg === 'beautifulsoup4' ? 'bs4' : pkg
+      );
+      
+      const results = await invoke<Array<[string, boolean]>>('check_python_packages', {
+        packages: checkNames
+      });
+      
+      const packageStatus = essentialPackages.map((pkg, index) => ({
+        name: pkg,
+        installed: results[index] ? results[index][1] : false
+      }));
+      
+      setPackages(packageStatus);
+    } catch (error) {
+      console.error('Failed to check packages:', error);
+      setInstallStatus(`Failed to check packages: ${error}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const installEssentials = async () => {
+    setIsInstalling(true);
+    setInstallStatus('Installing essential Python packages...');
+    
+    try {
+      const result = await invoke<string>('install_python_essentials');
+      setInstallStatus(result);
+      // Refresh package status
+      await checkPackages();
+    } catch (error) {
+      setInstallStatus(`Installation failed: ${error}`);
+    } finally {
+      setIsInstalling(false);
+    }
+  };
+
+  const setupEnvironment = async () => {
+    setIsInstalling(true);
+    setInstallStatus('Setting up Python environment...');
+    
+    try {
+      const result = await invoke<string>('setup_python_environment');
+      setInstallStatus(result);
+      // Refresh package status
+      await checkPackages();
+    } catch (error) {
+      setInstallStatus(`Setup failed: ${error}`);
+    } finally {
+      setIsInstalling(false);
+    }
+  };
+
+  return (
+    <Card className="p-6 bg-gray-900 border-gray-800">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-100 flex items-center">
+              <Package className="mr-2" size={20} />
+              Python Packages
+            </h2>
+            <p className="text-sm text-gray-400">Manage Python libraries for enhanced scripting</p>
+          </div>
+          <Button
+            onClick={checkPackages}
+            disabled={isLoading}
+            variant="secondary"
+            size="sm"
+          >
+            <RefreshCw className={`mr-2 ${isLoading ? 'animate-spin' : ''}`} size={16} />
+            {isLoading ? 'Checking...' : 'Refresh'}
+          </Button>
+        </div>
+
+        {/* Package Status */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-gray-300">Essential Packages</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {packages.map((pkg) => (
+              <div
+                key={pkg.name}
+                className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"
+              >
+                <span className="text-sm text-gray-300">{pkg.name}</span>
+                <div className="flex items-center">
+                  {pkg.installed ? (
+                    <Check className="text-green-400" size={16} />
+                  ) : (
+                    <X className="text-red-400" size={16} />
+                  )}
+                  <span className={`ml-2 text-xs ${
+                    pkg.installed ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    {pkg.installed ? 'Installed' : 'Missing'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Button
+            onClick={setupEnvironment}
+            disabled={isInstalling}
+            className="flex-1"
+          >
+            <Download className="mr-2" size={16} />
+            {isInstalling ? 'Setting up...' : 'Setup Environment'}
+          </Button>
+          
+          <Button
+            onClick={installEssentials}
+            disabled={isInstalling}
+            variant="secondary"
+            className="flex-1"
+          >
+            <Package className="mr-2" size={16} />
+            {isInstalling ? 'Installing...' : 'Install Essentials'}
+          </Button>
+        </div>
+
+        {/* Status */}
+        {installStatus && (
+          <div className={`p-4 rounded-lg ${
+            installStatus.includes('failed') || installStatus.includes('Failed')
+              ? 'bg-red-900/50 border border-red-700 text-red-200'
+              : installStatus.includes('Installing') || installStatus.includes('Setting up')
+              ? 'bg-blue-900/50 border border-blue-700 text-blue-200'
+              : 'bg-green-900/50 border border-green-700 text-green-200'
+          }`}>
+            <p className="text-sm">{installStatus}</p>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

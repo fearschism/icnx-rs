@@ -132,7 +132,8 @@ export default function QuickDownload() {
         // Only auto-remove real download cards (not scrape preview cards)
         if (c.isScrape) return true;
         if (!p) return true;
-        return !(p.status === 'completed' || p.progress === 1);
+        // Auto-remove completed, failed, or cancelled downloads
+        return !(p.status === 'completed' || p.status === 'failed' || p.status === 'cancelled' || p.progress === 1);
       });
       if (next.length !== prev.length) {
         try { (window as any).__icnxOverviewCards = next; } catch (_) {}
@@ -239,31 +240,72 @@ export default function QuickDownload() {
         return;
       }
 
-      // Start a background scrape and show a card in the overview (do not navigate)
-      ;(window as any).__icnxDestination = destination;
-      ;(window as any).__icnxForceNewScrape = true;
-      ;(window as any).__icnxHasActiveSession = true;
-      ;(window as any).__icnxActive = { kind: 'scrape', url: url.trim() };
-      window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
-      // create an overview card representing the scrape
+      // Run the script directly and handle results in Quick Download
+      setStatus('Running scraper...');
       const cardId = crypto.randomUUID();
-      const newCard = { id: cardId, url: url.trim(), filename: undefined, destination, isScrape: true, scriptName: picked.name };
-      // de-duplicate any existing scrape card for the same URL before adding
+      const newCard = { id: cardId, url: url.trim(), filename: `${picked.name} results`, destination, isScrape: true, scriptName: picked.name };
+      
+      // Add card immediately to show progress
       setCards((prev) => { 
         const filtered = prev.filter((c) => !(c.isScrape && c.url === newCard.url));
         const next = [...filtered, newCard]; 
         try { (window as any).__icnxOverviewCards = next; } catch(_){}
         return next; 
       });
-      (async () => {
-        try {
-          (window as any).__icnxCurrentScrapeKey = `${picked.name}::${url.trim()}`;
-          await invoke('run_script', { scriptName: picked.name, options: { inputUrl: url.trim(), maxPages: 10 } });
-        } catch (err) {
-          console.error('failed to start scraper', err);
+
+      try {
+        // Run script and get results directly
+        const scriptResult = await invoke<any>('run_script', { 
+          scriptName: picked.name, 
+          options: { 
+            target_url: url.trim(),
+            max_stories: 10, // For Hacker News scraper
+            max_repos: 10,   // For GitHub scraper
+            max_items: 10    // For generic scrapers
+          } 
+        });
+
+        if (scriptResult && scriptResult.items && scriptResult.items.length > 0) {
+          // Convert script results to download items and start download session
+          const downloadItems = scriptResult.items.map((item: any) => ({
+            url: item.url,
+            filename: item.filename || item.title || 'scraped_item.html'
+          }));
+
+          const sessionId = await invoke<string>('start_download_session', { 
+            items: downloadItems, 
+            destination 
+          });
+
+          // Update card with session ID and mark as successful
+          setCards((prev) => prev.map(c => 
+            c.id === cardId 
+              ? { ...c, sessionId, status: `Found ${downloadItems.length} items` }
+              : c
+          ));
+
+          setStatus(`✓ Started downloading ${downloadItems.length} items from ${picked.name}`);
+        } else {
+          // No items found
+          setCards((prev) => prev.map(c => 
+            c.id === cardId 
+              ? { ...c, status: 'No items found' }
+              : c
+          ));
+          setStatus('Scraper completed but found no items to download');
         }
-      })();
-      // clear the url field and reset status
+      } catch (err) {
+        console.error('Scraper failed:', err);
+        // Update card to show error
+        setCards((prev) => prev.map(c => 
+          c.id === cardId 
+            ? { ...c, status: `Error: ${err}` }
+            : c
+        ));
+        setStatus(`Scraper failed: ${err}`);
+      }
+
+      // Clear the url field and reset downloading state
       setUrl('');
       setStatus('');
       setIsDownloading(false);
@@ -481,28 +523,71 @@ export default function QuickDownload() {
           inputUrl={url}
           onPick={async (script) => {
             setShowScriptPicker(false);
-            ;(window as any).__icnxDestination = destination;
-            ;(window as any).__icnxHasActiveSession = true;
-            ;(window as any).__icnxForceNewScrape = true;
-            ;(window as any).__icnxActive = { kind: 'scrape', url: url.trim() };
-            window.dispatchEvent(new CustomEvent('icnx:active-session-updated'));
-            // create an overview card for the scrape and start the scraper in background
-              const cardId = crypto.randomUUID();
-              const newCard = { id: cardId, url: url.trim(), filename: undefined, destination, isScrape: true, scriptName: script.name };
-              setCards((prev) => { 
-                const filtered = prev.filter((c) => !(c.isScrape && c.url === newCard.url));
-                const next = [...filtered, newCard]; 
-                try { (window as any).__icnxOverviewCards = next; } catch(_){}
-                return next; 
+            setIsDownloading(true);
+            setStatus('Running scraper...');
+            
+            // Create card for the selected script
+            const cardId = crypto.randomUUID();
+            const newCard = { id: cardId, url: url.trim(), filename: `${script.name} results`, destination, isScrape: true, scriptName: script.name };
+            
+            setCards((prev) => { 
+              const filtered = prev.filter((c) => !(c.isScrape && c.url === newCard.url));
+              const next = [...filtered, newCard]; 
+              try { (window as any).__icnxOverviewCards = next; } catch(_){}
+              return next; 
+            });
+
+            try {
+              // Run script and get results directly (same as single script flow)
+              const scriptResult = await invoke<any>('run_script', { 
+                scriptName: script.name, 
+                options: { 
+                  target_url: url.trim(),
+                  max_stories: 10,
+                  max_repos: 10,
+                  max_items: 10
+                } 
               });
-              (async () => {
-              try {
-                (window as any).__icnxCurrentScrapeKey = `${script.name}::${url.trim()}`;
-                await invoke('run_script', { scriptName: script.name, options: { inputUrl: url.trim(), maxPages: 10 } });
-              } catch (err) {
-                console.error('failed to start scraper', err);
+
+              if (scriptResult && scriptResult.items && scriptResult.items.length > 0) {
+                const downloadItems = scriptResult.items.map((item: any) => ({
+                  url: item.url,
+                  filename: item.filename || item.title || 'scraped_item.html'
+                }));
+
+                const sessionId = await invoke<string>('start_download_session', { 
+                  items: downloadItems, 
+                  destination 
+                });
+
+                setCards((prev) => prev.map(c => 
+                  c.id === cardId 
+                    ? { ...c, sessionId, status: `Found ${downloadItems.length} items` }
+                    : c
+                ));
+
+                setStatus(`✓ Started downloading ${downloadItems.length} items from ${script.name}`);
+              } else {
+                setCards((prev) => prev.map(c => 
+                  c.id === cardId 
+                    ? { ...c, status: 'No items found' }
+                    : c
+                ));
+                setStatus('Scraper completed but found no items to download');
               }
-            })();
+            } catch (err) {
+              console.error('Scraper failed:', err);
+              setCards((prev) => prev.map(c => 
+                c.id === cardId 
+                  ? { ...c, status: `Error: ${err}` }
+                  : c
+              ));
+              setStatus(`Scraper failed: ${err}`);
+            }
+
+            // Clear URL and reset state
+            setUrl('');
+            setIsDownloading(false);
           }}
         />
       )}

@@ -577,7 +577,7 @@ export default function DownloadSession({ items, destination, started, onStarted
           {sessionStats.overallKnown ? (
             <div className="bg-green-500 h-3 rounded-full" style={{ width: `${Math.round(sessionStats.overall * 100)}%` }} />
           ) : (
-            <div className="bg-gray-600 h-3 rounded animate-pulse" />
+            <div className="bg-gray-600 h-3 rounded" />
           )}
         </div>
       </div>

@@ -103,7 +103,7 @@ function DownloadDetails({ downloadInfo, onBack }: DownloadDetailsProps) {
   const getStatusIcon = () => {
     switch (progress.status) {
       case 'downloading':
-        return <Download className="animate-pulse text-blue-400" size={24} />;
+        return <Download className="text-blue-400" size={24} />;
       case 'completed':
         return <CheckCircle className="text-green-400" size={24} />;
       case 'failed':

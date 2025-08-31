@@ -33,9 +33,17 @@ base64 = "0.22"
 mime_guess = "2.0"
 crossbeam-channel = "0.5"
 futures-util = "0.3"
+regex = "1.10"
 
 # Embedded JavaScript engine
 boa_engine = "0.17"
+
+# Python engine
+pyo3 = { version = "0.20", features = ["auto-initialize"] }
+
+# Python library integration
+python3-dll-a = "0.2"
+zip = "0.6"
 
 # File system
 rfd = "0.14"

@@ -17,6 +17,7 @@ import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 // Ensure language contributions are registered (tokenizers, language services)
 import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution';
 import 'monaco-editor/esm/vs/language/typescript/monaco.contribution';
+import 'monaco-editor/esm/vs/basic-languages/python/python.contribution';
 
 // Attach MonacoEnvironment early
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

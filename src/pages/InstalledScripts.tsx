@@ -141,7 +141,7 @@ function InstalledScripts() {
     <div className="animate-fade-in">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">Installed Scripts</h1>
-        <p className="text-gray-400">Manage and run your JavaScript scraper scripts</p>
+        <p className="text-gray-400">Manage and run your Python and JavaScript scraper scripts</p>
       </div>
 
       {/* Action Bar */}

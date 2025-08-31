@@ -1,0 +1,27 @@
+{
+  "name": "Python Example Script",
+  "version": "1.0.0",
+  "description": "Example Python script for ICNX",
+  "author": "ICNX Team",
+  "runtime": "python",
+  "entry": "script.py",
+  "options": {
+    "inputUrl": {
+      "type": "string",
+      "required": true,
+      "description": "URL to scrape"
+    },
+    "outputDir": {
+      "type": "string",
+      "required": false,
+      "description": "Output directory",
+      "default": "downloads"
+    },
+    "maxItems": {
+      "type": "number",
+      "required": false,
+      "description": "Maximum items to download",
+      "default": 100
+    }
+  }
+}

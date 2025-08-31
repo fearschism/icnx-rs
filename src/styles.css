@@ -355,10 +355,9 @@ html.theme-Dark::after, body.theme-Dark::after {
   background-color: #050405;
   background-image: none;
   background-blend-mode: normal;
-  /* make sure the breathing animation runs for dark theme overlay */
-  animation: icnx-bg-breathe 5s ease-in-out infinite;
-  animation-fill-mode: both;
-  will-change: opacity;
+  /* static opacity for performance */
+  opacity: 0.4;
+  will-change: auto;
 }
 
 /* Light theme: three-stop subtle gradient (pampas -> warm mid -> soft accent) */
@@ -368,10 +367,10 @@ html.theme-Light::before, body.theme-Light::before {
 /* flipped (light) - invert mid/warm stops for a visible but soft flip */
 html.theme-Light::after, body.theme-Light::after {
   background-image: linear-gradient(120deg, rgba(217,138,127,0.12) 0%, #F0E6DC 50%, #F4F0E6 100%);
-  /* make sure the breathing animation runs for light theme overlay */
-  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite, icnx-bg-breathe 5s ease-in-out infinite;
+  /* orbit and float animations only */
+  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite;
   animation-fill-mode: both;
-  will-change: opacity, background-position;
+  will-change: background-position;
 }
 
 /* Background motion: slow orbit + gentle float to give the app "life".
@@ -412,24 +411,14 @@ html.theme-Light #root::before, body.theme-Light #root::before {
   animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite;
 }
 
-/* breathe animation: primary color fades in and out slowly (15s) */
-@keyframes icnx-bg-breathe {
-  0%   { opacity: 0; }
-  20%  { opacity: 0.0; }
-  45%  { opacity: 0.9; }
-  55%  { opacity: 0.9; }
-  80%  { opacity: 0.0; }
-  100% { opacity: 0; }
-}
-
-/* apply the breathe to the overlay pseudo-element so the primary color fades in/out */
+/* apply the animation to the overlay pseudo-element */
 html::after, body::after {
-  /* overlay: faster test timings; breathe 5s for visible in/out */
-  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite, icnx-bg-breathe 5s ease-in-out infinite;
+  /* overlay: orbit and float animations only */
+  animation: icnx-bg-orbit-bg 8s linear infinite, icnx-bg-float-bg 3s ease-in-out infinite;
 }
 
 /* root fallbacks: ensure the overlay layer exists if the app uses #root::before */
-/* Root-level overlay fallbacks with explicit layers so breathing always works */
+/* Root-level overlay fallbacks with explicit layers */
 html.theme-Dark #root::after, body.theme-Dark #root::after {
   content: "";
   position: fixed;
@@ -437,9 +426,8 @@ html.theme-Dark #root::after, body.theme-Dark #root::after {
   z-index: -1; /* above ::before (-2/-3), below content (1) */
   pointer-events: none;
   background-color: #050405 !important; /* near-black */
-  animation: icnx-bg-breathe 30s ease-in-out infinite !important;
-  animation-fill-mode: both;
-  will-change: opacity;
+  opacity: 0.3; /* static opacity instead of breathing animation */
+  will-change: auto;
 }
 html.theme-Light #root::after, body.theme-Light #root::after {
   content: "";
@@ -448,9 +436,8 @@ html.theme-Light #root::after, body.theme-Light #root::after {
   z-index: -1;
   pointer-events: none;
   background-image: linear-gradient(120deg, rgba(37, 15, 12, 0.12) 0%, #fac38d 50%, #F4F0E6 100%) !important;
-  animation: icnx-bg-breathe 30s ease-in-out infinite !important;
-  animation-fill-mode: both;
-  will-change: opacity;
+  opacity: 0.3; /* static opacity instead of breathing animation */
+  will-change: auto;
 }
 
 /* Respect user's reduced-motion preference */
@@ -517,8 +504,8 @@ html.theme-Light #root::before, body.theme-Light #root::before {
   height: 64px;
   border-radius: 12px;
   transform-origin: center center;
-  /* entrance runs immediately; float starts slightly after entrance; pulse delayed so rotation (on wrapper) finishes first */
-  animation: icnx-splash-entrance 600ms cubic-bezier(.2,.9,.3,1) both, icnx-splash-float 3200ms ease-in-out 700ms infinite, icnx-splash-pulse 1800ms ease-in-out 1700ms infinite;
+  /* entrance runs immediately; float starts slightly after entrance */
+  animation: icnx-splash-entrance 600ms cubic-bezier(.2,.9,.3,1) both, icnx-splash-float 3200ms ease-in-out 700ms infinite;
 }
 
 @keyframes icnx-splash-entrance {
@@ -531,12 +518,6 @@ html.theme-Light #root::before, body.theme-Light #root::before {
   0% { transform: translateY(0) rotate(0deg); }
   50% { transform: translateY(-6px) rotate(1deg); }
   100% { transform: translateY(0) rotate(0deg); }
-}
-
-@keyframes icnx-splash-pulse {
-  0% { box-shadow: 0 6px 18px rgba(0,0,0,0.6), 0 0 0 0 rgba(185,81,64,0.06); }
-  70% { box-shadow: 0 10px 30px rgba(0,0,0,0.55), 0 0 0 10px rgba(185,81,64,0.02); }
-  100% { box-shadow: 0 6px 18px rgba(0,0,0,0.6), 0 0 0 0 rgba(185,81,64,0.00); }
 }
 
 @keyframes icnx-splash-rotate {
@@ -552,10 +533,9 @@ html.theme-Light #root::before, body.theme-Light #root::before {
 html.theme-Dark::after, body.theme-Dark::after {
   background-color: #050405 !important;
   background-image: none !important;
-  /* subtle breath: darkens mid-cycle, gradient visible between breaths */
-  animation: icnx-bg-breathe 15s ease-in-out infinite !important;
-  animation-fill-mode: both !important;
-  will-change: opacity !important;
+  /* static opacity for performance */
+  opacity: 0.4 !important;
+  will-change: auto !important;
   z-index: -1 !important;
 }
 
